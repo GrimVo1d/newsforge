@@ -26,10 +26,16 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
+    "rest_framework_simplejwt",
     "drf_spectacular",
     "django_filters",
     "apps.core",
 ]
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME_MINUTES": 15,
+    "REFRESH_TOKEN_LIFETIME_DAYS": 7,
+}
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
