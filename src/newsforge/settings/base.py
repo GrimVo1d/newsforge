@@ -30,6 +30,7 @@ INSTALLED_APPS = [
     "drf_spectacular",
     "django_filters",
     "apps.core",
+    "apps.feeds",
 ]
 
 SIMPLE_JWT = {
