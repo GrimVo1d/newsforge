@@ -38,3 +38,20 @@ celerybeat-schedule*
 
 docs/SPEC.md
 docs/ROADMAP.md
+
+# IDE / OS extras
+.pytest_cache/
+.tox/
+.nox/
+.cache/
+.ipynb_checkpoints/
+.history/
+pgadmin/
+
+# coverage artifacts
+.coverage.*
+coverage.xml
+htmlcov/
+
+# pytest-django artifacts
+test-results/
