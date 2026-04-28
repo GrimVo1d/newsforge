@@ -31,6 +31,7 @@ INSTALLED_APPS = [
     "django_filters",
     "apps.core",
     "apps.feeds",
+    "apps.articles",
 ]
 
 SIMPLE_JWT = {
