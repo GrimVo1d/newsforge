@@ -72,3 +72,51 @@ def detect_language(text: str) -> str:
 def content_hash(canonical_url: str, title: str, body: str) -> str:
     payload = f"{canonical_url}\n{title.strip()}\n{(body or '').strip()[:512]}".encode()
     return hashlib.sha256(payload).hexdigest()
+
+
+from dataclasses import dataclass  # noqa: E402
+
+
+@dataclass(slots=True)
+class NormalizedEntry:
+    """Result of normalize_entry: ready-for-upsert fields."""
+
+    canonical_url: str
+    url: str
+    title: str
+    summary: str
+    body: str
+    author: str | None
+    language: str
+    content_hash: str
+    guid: str
+    published_at: object  # datetime | None — left as object to avoid heavy imports here
+
+
+def normalize_entry(
+    *,
+    url: str,
+    title: str,
+    summary: str,
+    body: str,
+    guid: str = "",
+    author: str | None = None,
+    published_at: object = None,
+) -> NormalizedEntry:
+    canonical = canonicalize_url(url)
+    clean_summary = sanitize_html(summary)
+    clean_body = sanitize_html(body)
+    lang = detect_language(f"{title}\n{clean_summary}\n{clean_body}")
+    digest = content_hash(canonical, title, clean_body or clean_summary)
+    return NormalizedEntry(
+        canonical_url=canonical,
+        url=url,
+        title=title.strip(),
+        summary=clean_summary,
+        body=clean_body,
+        author=author,
+        language=lang,
+        content_hash=digest,
+        guid=guid,
+        published_at=published_at,
+    )
