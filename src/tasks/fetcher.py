@@ -46,10 +46,25 @@ def fetch_feed(self, feed_id: int) -> dict:  # type: ignore[no-untyped-def]
         return {"status": FeedStatus.NOT_MODIFIED}
 
     if result.status != "ok" or result.body is None:
+        from apps.feeds.backoff import disabled_until, next_attempt_at, should_disable
+
         feed.last_status = result.status
         feed.consecutive_errors = feed.consecutive_errors + 1
+        feed.next_fetch_at = next_attempt_at(
+            base_seconds=feed.interval_seconds,
+            consecutive_errors=feed.consecutive_errors,
+        )
+        if should_disable(feed.consecutive_errors):
+            feed.disabled_until = disabled_until()
         feed.save(
-            update_fields=["last_status", "last_fetched_at", "consecutive_errors", "updated_at"]
+            update_fields=[
+                "last_status",
+                "last_fetched_at",
+                "consecutive_errors",
+                "next_fetch_at",
+                "disabled_until",
+                "updated_at",
+            ]
         )
         return {"status": result.status}
 
@@ -77,6 +92,7 @@ def fetch_feed(self, feed_id: int) -> dict:  # type: ignore[no-untyped-def]
     feed.last_modified = result.last_modified or feed.last_modified
     feed.last_status = FeedStatus.OK
     feed.consecutive_errors = 0
+    feed.disabled_until = None
     feed.save(
         update_fields=[
             "etag",
@@ -84,6 +100,7 @@ def fetch_feed(self, feed_id: int) -> dict:  # type: ignore[no-untyped-def]
             "last_status",
             "last_fetched_at",
             "consecutive_errors",
+            "disabled_until",
             "updated_at",
         ]
     )
