@@ -68,7 +68,10 @@ def fetch_feed(self, feed_id: int) -> dict:  # type: ignore[no-untyped-def]
         )
         return {"status": result.status}
 
-    parsed = feedparser.parse(result.body)
+    body = result.body
+    if body[:3] == b"\xef\xbb\xbf":  # strip UTF-8 BOM that some servers send
+        body = body[3:]
+    parsed = feedparser.parse(body)
     entries = list(parsed.entries or [])
 
     from tasks.articles import process_article  # local import to avoid celery circular
