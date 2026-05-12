@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from django.conf import settings
+from django.contrib.postgres.fields import ArrayField
 from django.db import models
 
 
@@ -33,3 +35,27 @@ class ArticleTag(models.Model):
                 fields=["article", "tag"], name="tags_articletag_unique"
             ),
         ]
+
+
+class TagRule(models.Model):
+    class Match(models.TextChoices):
+        ANY = "any", "any"
+        ALL = "all", "all"
+
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="tag_rules",
+        db_column="owner_id",
+    )
+    name = models.CharField(max_length=120)
+    keywords = ArrayField(models.CharField(max_length=64))
+    match = models.CharField(max_length=8, choices=Match.choices, default=Match.ANY)
+    language = models.CharField(max_length=8, null=True, blank=True)
+    tag = models.ForeignKey(
+        Tag, on_delete=models.CASCADE, related_name="rules", db_column="tag_id"
+    )
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "tags_tagrule"
