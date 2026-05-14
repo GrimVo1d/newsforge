@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     "apps.feeds",
     "apps.articles",
     "apps.tags",
+    "apps.search",
 ]
 
 SIMPLE_JWT = {

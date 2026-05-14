@@ -9,4 +9,5 @@ urlpatterns = [
     path("auth/token/refresh/", TokenRefreshView.as_view(), name="auth-token-refresh"),
     path("", include("apps.feeds.urls")),
     path("", include("apps.tags.urls")),
+    path("", include("apps.search.urls")),
 ]
