@@ -44,6 +44,19 @@ ORDER BY rank DESC, a.published_at DESC NULLS LAST
 LIMIT %(limit)s OFFSET %(offset)s;
 """
 
+TRGM_FALLBACK_SQL = """
+SELECT
+  a.id, a.title, a.summary, a.url, a.feed_id, a.published_at, a.language,
+  similarity(a.title, %(query)s)::float AS rank,
+  '' AS highlight
+FROM articles_article a
+WHERE NOT a.is_deleted
+  AND a.title %% %(query)s
+ORDER BY rank DESC
+LIMIT %(limit)s OFFSET %(offset)s;
+"""
+
+
 SEARCH_DATE_SQL = """
 WITH q AS (
   SELECT websearch_to_tsquery(%(cfg)s::regconfig, unaccent(%(query)s)) AS tsq
@@ -86,5 +99,16 @@ def run_search(
     sql = SEARCH_DATE_SQL if sort == "date" else SEARCH_RANK_SQL
     with connection.cursor() as cur:
         cur.execute(sql, params)
+        cols = [c[0] for c in cur.description]
+        rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+    if rows or len(query) > 24:
+        return rows
+    # Graceful fuzzy fallback for short queries that produced no hits.
+    return run_trgm_fallback(query=query, limit=limit, offset=offset)
+
+
+def run_trgm_fallback(*, query: str, limit: int, offset: int) -> list[dict[str, Any]]:
+    with connection.cursor() as cur:
+        cur.execute(TRGM_FALLBACK_SQL, {"query": query, "limit": limit, "offset": offset})
         cols = [c[0] for c in cur.description]
         return [dict(zip(cols, row)) for row in cur.fetchall()]
