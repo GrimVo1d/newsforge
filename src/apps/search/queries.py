@@ -7,6 +7,20 @@ from typing import Any
 
 from django.db import connection
 
+SUPPORTED_LANGS = ("russian", "english", "simple")
+
+
+def coerce_lang(lang: str | None) -> str:
+    """Whitelist regconfig names — never interpolate user input into SQL."""
+    if not lang:
+        return "simple"
+    lang = lang.lower()
+    if lang in SUPPORTED_LANGS:
+        return lang
+    aliases = {"ru": "russian", "en": "english"}
+    return aliases.get(lang, "simple")
+
+
 SEARCH_RANK_SQL = """
 WITH q AS (
   SELECT websearch_to_tsquery(%(cfg)s::regconfig, unaccent(%(query)s)) AS tsq
@@ -59,7 +73,7 @@ def run_search(
     limit: int = 20,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
-    cfg = lang or "simple"
+    cfg = coerce_lang(lang)
     params = {
         "cfg": cfg,
         "query": query,
