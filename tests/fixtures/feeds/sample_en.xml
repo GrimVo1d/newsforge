@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Sample EN feed</title>
+    <link>https://example.com</link>
+    <description>Test feed in English</description>
+    <item>
+      <title>Django release 5.1 ships new features</title>
+      <link>https://example.com/post/1</link>
+      <guid isPermaLink="false">post-1</guid>
+      <pubDate>Mon, 04 May 2026 12:00:00 GMT</pubDate>
+      <description>Django 5.1 introduces DRF improvements and async views.</description>
+    </item>
+    <item>
+      <title>What is new in DRF 3.16</title>
+      <link>https://example.com/post/2</link>
+      <guid isPermaLink="false">post-2</guid>
+      <pubDate>Tue, 05 May 2026 09:00:00 GMT</pubDate>
+      <description>DRF 3.16 has better support for typed views and openapi schema.</description>
+    </item>
+  </channel>
+</rss>

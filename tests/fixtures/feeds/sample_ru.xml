@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Тестовый русский фид</title>
+    <link>https://example.ru</link>
+    <description>Тестовая лента</description>
+    <item>
+      <title>Что нового в DRF 3.16</title>
+      <link>https://example.ru/post/1</link>
+      <guid isPermaLink="false">post-ru-1</guid>
+      <description>DRF 3.16 принёс улучшения схемы и типизации.</description>
+    </item>
+  </channel>
+</rss>
