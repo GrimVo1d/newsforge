@@ -17,9 +17,36 @@ from langdetect import DetectorFactory, LangDetectException, detect
 DetectorFactory.seed = 0
 
 ALLOWED_TAGS = [
-    "a", "p", "br", "strong", "em", "b", "i", "u", "ul", "ol", "li",
-    "blockquote", "code", "pre", "h1", "h2", "h3", "h4", "h5", "h6",
-    "img", "figure", "figcaption", "hr", "table", "thead", "tbody", "tr", "th", "td",
+    "a",
+    "p",
+    "br",
+    "strong",
+    "em",
+    "b",
+    "i",
+    "u",
+    "ul",
+    "ol",
+    "li",
+    "blockquote",
+    "code",
+    "pre",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "img",
+    "figure",
+    "figcaption",
+    "hr",
+    "table",
+    "thead",
+    "tbody",
+    "tr",
+    "th",
+    "td",
 ]
 ALLOWED_ATTRIBUTES = {
     "a": ["href", "title", "rel"],
@@ -33,7 +60,8 @@ _SUPPORTED_LANGS = {"ru": "russian", "en": "english"}
 def canonicalize_url(url: str) -> str:
     parsed = urlparse(url)
     cleaned_query = [
-        (k, v) for k, v in parse_qsl(parsed.query, keep_blank_values=False)
+        (k, v)
+        for k, v in parse_qsl(parsed.query, keep_blank_values=False)
         if not any(k.lower().startswith(p) for p in _UTM_PREFIXES)
     ]
     cleaned_query.sort()

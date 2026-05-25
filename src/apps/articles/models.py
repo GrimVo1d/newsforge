@@ -30,9 +30,7 @@ class Article(models.Model):
         indexes = [
             models.Index(fields=["feed", "-published_at"], name="articles_feed_pub_idx"),
             models.Index(fields=["-published_at"], name="articles_pub_idx"),
-            GinIndex(
-                fields=["tsv"], name="articles_tsv_idx", condition=models.Q(is_deleted=False)
-            ),
+            GinIndex(fields=["tsv"], name="articles_tsv_idx", condition=models.Q(is_deleted=False)),
         ]
 
     def __str__(self) -> str:

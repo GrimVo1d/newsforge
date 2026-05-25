@@ -57,7 +57,7 @@ def run_search(
     with connection.cursor() as cur:
         cur.execute(sql, params)
         cols = [c[0] for c in cur.description]
-        rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+        rows = [dict(zip(cols, row, strict=True)) for row in cur.fetchall()]
     if rows or len(query) > 24:
         return rows
     return run_trgm_fallback(query=query, limit=limit, offset=offset)
@@ -67,4 +67,4 @@ def run_trgm_fallback(*, query: str, limit: int, offset: int) -> list[dict[str, 
     with connection.cursor() as cur:
         cur.execute(TRGM_FALLBACK_SQL, {"query": query, "limit": limit, "offset": offset})
         cols = [c[0] for c in cur.description]
-        return [dict(zip(cols, row)) for row in cur.fetchall()]
+        return [dict(zip(cols, row, strict=True)) for row in cur.fetchall()]

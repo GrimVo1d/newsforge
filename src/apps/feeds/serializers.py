@@ -41,5 +41,5 @@ class FeedSerializer(serializers.ModelSerializer):
         try:
             assert_public_url(value)
         except SSRFError as exc:
-            raise serializers.ValidationError({"code": "ssrf_blocked", "detail": str(exc)})
+            raise serializers.ValidationError({"code": "ssrf_blocked", "detail": str(exc)}) from exc
         return value

@@ -30,13 +30,14 @@ class ArticleTagView(APIView):
         s.is_valid(raise_exception=True)
         tag = get_object_or_404(Tag, pk=s.validated_data["tag_id"])
         ArticleTag.objects.get_or_create(article=article, tag=tag)
-        return Response({"article_id": article.id, "tag_id": tag.id}, status=status.HTTP_201_CREATED)
+        return Response(
+            {"article_id": article.id, "tag_id": tag.id},
+            status=status.HTTP_201_CREATED,
+        )
 
     def delete(self, request: Request, article_id: int) -> Response:
         article = get_object_or_404(Article, pk=article_id, is_deleted=False)
         s = _ArticleTagInputSerializer(data=request.data)
         s.is_valid(raise_exception=True)
-        ArticleTag.objects.filter(
-            article=article, tag_id=s.validated_data["tag_id"]
-        ).delete()
+        ArticleTag.objects.filter(article=article, tag_id=s.validated_data["tag_id"]).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)

@@ -33,11 +33,17 @@ class SubscriptionSerializer(serializers.ModelSerializer):
         delivery = attrs.get("delivery")
         if delivery == Subscription.Delivery.WEBHOOK and not attrs.get("webhook_url"):
             raise serializers.ValidationError(
-                {"code": "missing_webhook_url", "detail": "webhook_url is required for delivery=webhook"}
+                {
+                    "code": "missing_webhook_url",
+                    "detail": "webhook_url is required for delivery=webhook",
+                }
             )
         if delivery == Subscription.Delivery.EMAIL and not attrs.get("email_to"):
             raise serializers.ValidationError(
-                {"code": "missing_email_to", "detail": "email_to is required for delivery=email"}
+                {
+                    "code": "missing_email_to",
+                    "detail": "email_to is required for delivery=email",
+                }
             )
         return attrs
 

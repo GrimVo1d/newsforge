@@ -31,9 +31,7 @@ class ArticleTag(models.Model):
     class Meta:
         db_table = "tags_articletag"
         constraints = [
-            models.UniqueConstraint(
-                fields=["article", "tag"], name="tags_articletag_unique"
-            ),
+            models.UniqueConstraint(fields=["article", "tag"], name="tags_articletag_unique"),
         ]
 
 
@@ -52,9 +50,7 @@ class TagRule(models.Model):
     keywords = ArrayField(models.CharField(max_length=64))
     match = models.CharField(max_length=8, choices=Match.choices, default=Match.ANY)
     language = models.CharField(max_length=8, null=True, blank=True)
-    tag = models.ForeignKey(
-        Tag, on_delete=models.CASCADE, related_name="rules", db_column="tag_id"
-    )
+    tag = models.ForeignKey(Tag, on_delete=models.CASCADE, related_name="rules", db_column="tag_id")
     is_active = models.BooleanField(default=True)
 
     class Meta:
