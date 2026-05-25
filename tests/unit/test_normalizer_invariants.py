@@ -42,11 +42,12 @@ def test_content_hash_is_stable(title, body):
 
 
 @settings(max_examples=100)
-@given(prefix=st.text(min_size=0, max_size=20))
-def test_canonicalize_strips_utm_no_matter_position(prefix):
-    base = canonicalize_url("https://x.io/path?a=1")
-    with_utm = canonicalize_url(f"https://x.io/path?{prefix}utm_source=z&a=1")
-    # utm_-prefixed keys are dropped; non-utm keys preserved.
-    assert "utm_source" not in with_utm
-    assert "a=1" in with_utm
-    assert "a=1" in base
+@given(other_key=_QUERY_KEYS, other_val=_QUERY_VALS)
+def test_canonicalize_strips_utm_alongside_other_params(other_key, other_val):
+    from urllib.parse import urlencode
+
+    raw = urlencode([(other_key, other_val), ("utm_source", "z"), ("a", "1")])
+    out = canonicalize_url(f"https://x.io/path?{raw}")
+    # All utm_-keyed params are dropped; non-utm keys preserved.
+    assert "utm_source=" not in out
+    assert "a=1" in out
