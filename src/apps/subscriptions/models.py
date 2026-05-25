@@ -60,7 +60,5 @@ class DeliveryLog(models.Model):
     class Meta:
         db_table = "subscriptions_deliverylog"
         constraints = [
-            models.UniqueConstraint(
-                fields=["subscription", "article"], name="delivery_log_unique"
-            )
+            models.UniqueConstraint(fields=["subscription", "article"], name="delivery_log_unique")
         ]

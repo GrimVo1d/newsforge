@@ -7,7 +7,6 @@ from hypothesis import strategies as st
 
 from apps.articles.normalizer import canonicalize_url, content_hash
 
-
 _QUERY_KEYS = st.text(
     alphabet=st.characters(min_codepoint=ord("a"), max_codepoint=ord("z")),
     min_size=1,

@@ -12,7 +12,8 @@ from apps.feeds.validators import SSRFError, assert_public_url
 
 @dataclass(slots=True)
 class FetchResult:
-    status: str  # 'ok' | 'not_modified' | 'too_large' | 'http_error' | 'network_error' | 'ssrf_blocked'
+    status: str
+    # one of: ok | not_modified | too_large | http_error | network_error | ssrf_blocked
     http_status: int | None
     body: bytes | None
     etag: str | None
@@ -30,7 +31,8 @@ def fetch(
     except SSRFError:
         return FetchResult("ssrf_blocked", None, None, None, None)
 
-    headers = {"User-Agent": settings.USER_AGENT, "Accept": "application/atom+xml, application/rss+xml, application/xml;q=0.9, */*;q=0.5"}
+    accept = "application/atom+xml, application/rss+xml, " "application/xml;q=0.9, */*;q=0.5"
+    headers = {"User-Agent": settings.USER_AGENT, "Accept": accept}
     if etag:
         headers["If-None-Match"] = etag
     if last_modified:

@@ -8,9 +8,7 @@ from apps.articles.normalizer import normalize_entry
 
 
 def test_guid_takes_precedence_when_present():
-    e = normalize_entry(
-        url="https://x/a", title="t", summary="", body="b", guid="g-1"
-    )
+    e = normalize_entry(url="https://x/a", title="t", summary="", body="b", guid="g-1")
     assert e.guid == "g-1"
 
 

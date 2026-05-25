@@ -8,7 +8,6 @@ from django.utils import timezone
 
 from apps.subscriptions.models import Subscription
 
-
 _MATCH_SQL = """
 WITH q AS (
   SELECT websearch_to_tsquery('simple'::regconfig, unaccent(%(query)s)) AS tsq

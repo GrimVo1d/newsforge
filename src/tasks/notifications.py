@@ -37,8 +37,14 @@ def _payload(article: Article) -> dict:
     }
 
 
-@shared_task(name="tasks.notifications.deliver", acks_late=True, autoretry_for=(httpx.HTTPError,),
-             retry_backoff=30, retry_jitter=True, max_retries=5)
+@shared_task(
+    name="tasks.notifications.deliver",
+    acks_late=True,
+    autoretry_for=(httpx.HTTPError,),
+    retry_backoff=30,
+    retry_jitter=True,
+    max_retries=5,
+)
 def deliver(subscription_id: int, article_id: int) -> dict:
     sub = Subscription.objects.get(pk=subscription_id, is_active=True)
     article = Article.objects.get(pk=article_id, is_deleted=False)
@@ -65,10 +71,11 @@ def deliver(subscription_id: int, article_id: int) -> dict:
             error = str(exc)
             raise
     elif sub.delivery == Subscription.Delivery.EMAIL and sub.email_to:
+        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@newsforge.local")
         send_mail(
             subject=f"[newsforge] {article.title}",
             message=article.url,
-            from_email=settings.DEFAULT_FROM_EMAIL if hasattr(settings, "DEFAULT_FROM_EMAIL") else "no-reply@newsforge.local",
+            from_email=from_email,
             recipient_list=[sub.email_to],
             fail_silently=False,
         )

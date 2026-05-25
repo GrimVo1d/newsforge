@@ -30,4 +30,7 @@ class FeedViewSet(viewsets.ModelViewSet):
         feed = self.get_object()
         feed.next_fetch_at = timezone.now()
         feed.save(update_fields=["next_fetch_at", "updated_at"])
-        return Response({"queued_at": feed.next_fetch_at.isoformat()}, status=status.HTTP_202_ACCEPTED)
+        return Response(
+            {"queued_at": feed.next_fetch_at.isoformat()},
+            status=status.HTTP_202_ACCEPTED,
+        )

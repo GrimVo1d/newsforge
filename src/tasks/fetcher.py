@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import feedparser
 from celery import shared_task
@@ -18,7 +18,7 @@ def _entry_published(entry: dict) -> datetime | None:
     parsed = entry.get("published_parsed") or entry.get("updated_parsed")
     if not parsed:
         return None
-    return datetime(*parsed[:6], tzinfo=timezone.utc)
+    return datetime(*parsed[:6], tzinfo=UTC)
 
 
 @shared_task(name="tasks.fetcher.fetch_feed", acks_late=True, bind=True)
@@ -77,17 +77,19 @@ def fetch_feed(self, feed_id: int) -> dict:  # type: ignore[no-untyped-def]
     from tasks.articles import process_article  # local import to avoid celery circular
 
     for entry in entries:
+        content = entry.get("content") or []
+        body_html = content[0].get("value", "") if content else ""
+        published = _entry_published(entry)
         process_article.apply_async(
             kwargs={
                 "feed_id": feed.id,
                 "url": entry.get("link") or "",
                 "title": entry.get("title") or "",
                 "summary": entry.get("summary") or "",
-                "body": entry.get("content", [{}])[0].get("value", "") if entry.get("content") else "",
+                "body": body_html,
                 "guid": entry.get("id") or entry.get("guid") or "",
                 "author": entry.get("author"),
-                "published_at": (_entry_published(entry).isoformat()
-                                 if _entry_published(entry) else None),
+                "published_at": published.isoformat() if published else None,
             }
         )
 

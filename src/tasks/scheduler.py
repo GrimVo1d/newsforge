@@ -4,7 +4,6 @@ from celery import shared_task
 from django.db import connection, transaction
 from django.utils import timezone
 
-
 _DUE_SQL = """
 SELECT id
 FROM feeds_feed
