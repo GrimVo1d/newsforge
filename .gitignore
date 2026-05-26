@@ -1,57 +1,42 @@
+# Python
 __pycache__/
 *.py[cod]
-*$py.class
 *.so
-.Python
+*.egg-info/
+build/
+dist/
 
+# Virtual environments
 .venv/
 venv/
-env/
 
+# Tool caches and reports
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+.hypothesis/
 .coverage
-htmlcov/
-
-*.log
-local_settings.py
-db.sqlite3
-staticfiles/
-media/
-
-.env
-.env.*
-!.env.example
-
-.idea/
-.vscode/
-*.swp
-.DS_Store
-
-build/
-dist/
-*.egg-info/
-
-docker-compose.override.yml
-celerybeat-schedule*
-
-docs/SPEC.md
-docs/ROADMAP.md
-
-# IDE / OS extras
-.pytest_cache/
-.tox/
-.nox/
-.cache/
-.ipynb_checkpoints/
-.history/
-pgadmin/
-
-# coverage artifacts
 .coverage.*
 coverage.xml
 htmlcov/
 
-# pytest-django artifacts
-test-results/
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+docker-compose.override.yml
+
+# Runtime artifacts
+*.log
+celerybeat-schedule*
+initial_feeds.json
+staticfiles/
+media/
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
