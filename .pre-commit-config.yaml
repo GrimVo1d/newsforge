@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
@@ -9,32 +9,26 @@ repos:
       - id: check-merge-conflict
       - id: check-added-large-files
         args: ["--maxkb=500"]
+      - id: detect-private-key
       - id: mixed-line-ending
         args: ["--fix=lf"]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.5.0
+    rev: v0.17.1
     hooks:
-      - id: ruff
+      - id: ruff-check
         args: ["--fix"]
       - id: ruff-format
 
-  - repo: https://github.com/psf/black
-    rev: 24.4.2
-    hooks:
-      - id: black
-
-  - repo: https://github.com/PyCQA/isort
-    rev: 5.13.2
-    hooks:
-      - id: isort
-
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.10.0
+  # mypy needs the project's dependencies and Django settings, so it runs from the
+  # active environment (the dev container) instead of an isolated hook env.
+  - repo: local
     hooks:
       - id: mypy
-        additional_dependencies:
-          - django-stubs
-          - djangorestframework-stubs
-        args: ["--config-file=pyproject.toml"]
+        name: mypy
+        entry: mypy
+        language: system
+        types: [python]
         files: ^src/
+        pass_filenames: false
+        args: ["src"]
