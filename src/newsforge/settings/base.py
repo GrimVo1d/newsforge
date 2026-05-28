@@ -117,6 +117,15 @@ HTTP_TIMEOUT = env.int("HTTP_TIMEOUT", default=20)
 MAX_RESPONSE_BYTES = env.int("MAX_RESPONSE_BYTES", default=5_242_880)
 PER_DOMAIN_MIN_INTERVAL = env.int("PER_DOMAIN_MIN_INTERVAL", default=30)
 
+# Email (subscription delivery)
+EMAIL_HOST = env("EMAIL_HOST", default="localhost")
+EMAIL_PORT = env.int("EMAIL_PORT", default=25)
+EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
+EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
+EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=False)
+EMAIL_TIMEOUT = 10
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="no-reply@newsforge.local")
+
 # Celery
 CELERY_BROKER_URL = env("CELERY_BROKER_URL", default="redis://redis:6379/1")
 CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default="redis://redis:6379/2")

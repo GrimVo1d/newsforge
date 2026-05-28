@@ -7,9 +7,17 @@ from celery.schedules import crontab
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "newsforge.settings.dev")
 
-app = Celery("newsforge")
+TASK_MODULES = (
+    "tasks.articles",
+    "tasks.digest",
+    "tasks.fetcher",
+    "tasks.notifications",
+    "tasks.scheduler",
+    "tasks.tags",
+)
+
+app = Celery("newsforge", include=TASK_MODULES)
 app.config_from_object("django.conf:settings", namespace="CELERY")
-app.autodiscover_tasks(["tasks"])
 
 app.conf.beat_schedule = {
     "enqueue-due-feeds": {

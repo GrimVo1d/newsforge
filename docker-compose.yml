@@ -1,16 +1,41 @@
 name: newsforge
 
+x-app: &app
+  build:
+    context: .
+    dockerfile: docker/Dockerfile
+    target: runtime
+  image: newsforge:dev
+  env_file:
+    - path: .env
+      required: false
+  environment: &app-env
+    DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-newsforge.settings.dev}
+    DATABASE_URL: postgres://nf:nf@db:5432/newsforge
+    REDIS_URL: redis://redis:6379/0
+    CELERY_BROKER_URL: redis://redis:6379/1
+    CELERY_RESULT_BACKEND: redis://redis:6379/2
+    EMAIL_HOST: mailpit
+    EMAIL_PORT: "1025"
+
+x-depends: &depends
+  db:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+  migrate:
+    condition: service_completed_successfully
+
 services:
   db:
-    image: postgres:16.2-alpine
+    image: postgres:16-alpine
     environment:
       POSTGRES_USER: nf
       POSTGRES_PASSWORD: nf
       POSTGRES_DB: newsforge
-    ports: ["5432:5432"]
+    ports: ["127.0.0.1:5432:5432"]
     volumes:
       - db_data:/var/lib/postgresql/data
-      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U nf -d newsforge"]
       interval: 5s
@@ -18,9 +43,9 @@ services:
       retries: 10
 
   redis:
-    image: redis:7.2-alpine
-    ports: ["6379:6379"]
+    image: redis:7-alpine
     command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports: ["127.0.0.1:6379:6379"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -28,61 +53,54 @@ services:
       retries: 10
 
   mailpit:
-    image: axllent/mailpit:latest
-    ports:
-      - "1025:1025"
-      - "8025:8025"
+    image: axllent/mailpit:v1.31.6
+    ports: ["127.0.0.1:8025:8025"]
+
+  migrate:
+    <<: *app
+    command: ["migrate"]
+    depends_on:
+      db:
+        condition: service_healthy
 
   api:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
+    <<: *app
     command: ["api"]
-    environment:
-      DJANGO_SETTINGS_MODULE: newsforge.settings.dev
-      DATABASE_URL: postgres://nf:nf@db:5432/newsforge
-      REDIS_URL: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/1
-      CELERY_RESULT_BACKEND: redis://redis:6379/2
-      SMTP_HOST: mailpit
-      SMTP_PORT: 1025
-    ports: ["8000:8000"]
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+    ports: ["127.0.0.1:8000:8000"]
+    depends_on: *depends
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   worker:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
+    <<: *app
     command: ["worker"]
-    environment:
-      DJANGO_SETTINGS_MODULE: newsforge.settings.dev
-      DATABASE_URL: postgres://nf:nf@db:5432/newsforge
-      REDIS_URL: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/1
-      CELERY_RESULT_BACKEND: redis://redis:6379/2
-      SMTP_HOST: mailpit
-      SMTP_PORT: 1025
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+    depends_on: *depends
 
   beat:
+    <<: *app
+    command: ["beat"]
+    depends_on: *depends
+
+  # Tests, linters and type checks: `make test`, `make lint`, `make typecheck`.
+  dev:
     build:
       context: .
       dockerfile: docker/Dockerfile
-    command: ["beat"]
+      target: dev
+    image: newsforge:tools
+    profiles: ["dev"]
     environment:
-      DJANGO_SETTINGS_MODULE: newsforge.settings.dev
-      DATABASE_URL: postgres://nf:nf@db:5432/newsforge
-      REDIS_URL: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/1
-      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      <<: *app-env
+      DJANGO_SETTINGS_MODULE: newsforge.settings.test
+    volumes:
+      - .:/app
     depends_on:
       db:
         condition: service_healthy

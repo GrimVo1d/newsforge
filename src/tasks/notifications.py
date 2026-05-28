@@ -71,11 +71,10 @@ def deliver(subscription_id: int, article_id: int) -> dict:
             error = str(exc)
             raise
     elif sub.delivery == Subscription.Delivery.EMAIL and sub.email_to:
-        from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@newsforge.local")
         send_mail(
             subject=f"[newsforge] {article.title}",
             message=article.url,
-            from_email=from_email,
+            from_email=settings.DEFAULT_FROM_EMAIL,
             recipient_list=[sub.email_to],
             fail_silently=False,
         )

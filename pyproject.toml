@@ -25,7 +25,7 @@ dependencies = [
     "langdetect>=1.0.9",
     "passlib[argon2]>=1.7",
     "prometheus-client>=0.20",
-    "gunicorn>=23.0",
+    "gunicorn>=26.0",
 ]
 
 [project.optional-dependencies]
