@@ -1,0 +1,62 @@
+from __future__ import annotations
+
+from datetime import timedelta
+
+import pytest
+from django.conf import settings
+from rest_framework.throttling import ScopedRateThrottle
+
+pytestmark = pytest.mark.django_db
+
+REGISTER = "/api/v1/auth/register/"
+TOKEN = "/api/v1/auth/token/"
+
+
+def test_register_and_obtain_token(api):
+    resp = api.post(REGISTER, {"username": "bob", "password": "correct-horse-battery"})
+    assert resp.status_code == 201
+    assert resp.json()["username"] == "bob"
+
+    resp = api.post(TOKEN, {"username": "bob", "password": "correct-horse-battery"})
+    assert resp.status_code == 200
+    assert {"access", "refresh"} <= resp.json().keys()
+
+
+def test_register_duplicate_username_is_conflict(api, user):
+    resp = api.post(REGISTER, {"username": user.username, "password": "correct-horse-battery"})
+    assert resp.status_code == 409
+    assert resp.json()["code"] == "username_taken"
+
+
+@pytest.mark.parametrize("password", ["short", "password123", "12345678901"])
+def test_register_rejects_weak_passwords(api, password):
+    resp = api.post(REGISTER, {"username": "carol", "password": password})
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "validation_error"
+
+
+def test_register_rejects_invalid_username(api):
+    resp = api.post(REGISTER, {"username": "bad name!", "password": "correct-horse-battery"})
+    assert resp.status_code == 400
+
+
+def test_auth_endpoints_are_throttled(api, monkeypatch):
+    from django.core.cache import cache
+
+    cache.clear()
+    monkeypatch.setattr(ScopedRateThrottle, "THROTTLE_RATES", {"auth": "2/min"})
+    codes = [api.post(TOKEN, {"username": "x", "password": "y"}).status_code for _ in range(3)]
+    assert codes == [401, 401, 429]
+    cache.clear()
+
+
+def test_jwt_lifetimes_are_applied():
+    from rest_framework_simplejwt.settings import api_settings
+
+    expected = {"access": timedelta(minutes=15), "refresh": timedelta(days=7)}
+    actual = {
+        "access": api_settings.ACCESS_TOKEN_LIFETIME,
+        "refresh": api_settings.REFRESH_TOKEN_LIFETIME,
+    }
+    assert actual == expected
+    assert settings.SIMPLE_JWT["ACCESS_TOKEN_LIFETIME"] == expected["access"]

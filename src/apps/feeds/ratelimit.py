@@ -14,7 +14,8 @@ from django.conf import settings
 _pool: redis.ConnectionPool | None = None
 
 
-def _client() -> redis.Redis:
+def redis_client() -> redis.Redis:
+    """Shared pooled client for the cache Redis (rate limits, health checks)."""
     global _pool
     if _pool is None:
         _pool = redis.ConnectionPool.from_url(settings.CACHES["default"]["LOCATION"])
@@ -31,8 +32,8 @@ def try_acquire(url: str, *, interval_seconds: int | None = None) -> bool:
     if not domain:
         return False
     ttl = interval_seconds or settings.PER_DOMAIN_MIN_INTERVAL
-    return bool(_client().set(_key(domain), b"1", nx=True, ex=ttl))
+    return bool(redis_client().set(_key(domain), b"1", nx=True, ex=ttl))
 
 
 def reset(domain: str) -> None:
-    _client().delete(_key(domain))
+    redis_client().delete(_key(domain))
