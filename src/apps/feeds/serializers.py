@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from django.conf import settings
 from rest_framework import serializers
 
 from apps.feeds.models import Feed
@@ -36,6 +37,13 @@ class FeedSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
+
+    def validate_interval_seconds(self, value: int) -> int:
+        if value < settings.MIN_FEED_INTERVAL_SECONDS:
+            raise serializers.ValidationError(
+                f"must be at least {settings.MIN_FEED_INTERVAL_SECONDS} seconds"
+            )
+        return value
 
     def validate_url(self, value: str) -> str:
         try:

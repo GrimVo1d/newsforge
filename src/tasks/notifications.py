@@ -13,6 +13,7 @@ from django.core.mail import send_mail
 from django.db import IntegrityError, transaction
 
 from apps.articles.models import Article
+from apps.core import safe_http
 from apps.subscriptions.models import DeliveryLog, Subscription
 
 
@@ -40,7 +41,7 @@ def _payload(article: Article) -> dict:
 @shared_task(
     name="tasks.notifications.deliver",
     acks_late=True,
-    autoretry_for=(httpx.HTTPError,),
+    autoretry_for=(httpx.HTTPError, safe_http.DeadlineExceededError),
     retry_backoff=30,
     retry_jitter=True,
     max_retries=5,
@@ -64,10 +65,21 @@ def deliver(subscription_id: int, article_id: int) -> dict:
             "User-Agent": settings.USER_AGENT,
         }
         try:
-            with httpx.Client(timeout=10.0) as client:
-                resp = client.post(sub.webhook_url, content=body, headers=headers)
+            resp = safe_http.request(
+                "POST",
+                sub.webhook_url,
+                headers=headers,
+                content=body,
+                timeout=10.0,
+                max_bytes=64 * 1024,
+                max_redirects=0,
+                allow_http=settings.ALLOW_PLAIN_HTTP,
+                truncate=True,
+            )
             http_status = resp.status_code
-        except httpx.HTTPError as exc:
+        except safe_http.UnsafeURLError as exc:
+            error = f"blocked: {exc}"
+        except (httpx.HTTPError, safe_http.DeadlineExceededError) as exc:
             error = str(exc)
             raise
     elif sub.delivery == Subscription.Delivery.EMAIL and sub.email_to:

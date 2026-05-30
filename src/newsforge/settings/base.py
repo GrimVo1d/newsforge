@@ -126,6 +126,11 @@ METRICS_TOKEN = env("METRICS_TOKEN", default="")
 USER_AGENT = env("USER_AGENT", default="newsforge/0.1")
 HTTP_TIMEOUT = env.int("HTTP_TIMEOUT", default=20)
 MAX_RESPONSE_BYTES = env.int("MAX_RESPONSE_BYTES", default=5_242_880)
+# Entries taken from one fetch; the rest of an oversized feed is ignored.
+MAX_ENTRIES_PER_FETCH = env.int("MAX_ENTRIES_PER_FETCH", default=200)
+MIN_FEED_INTERVAL_SECONDS = 300
+# Allow plain-http feed / webhook URLs (https only by default).
+ALLOW_PLAIN_HTTP = env.bool("ALLOW_PLAIN_HTTP", default=False)
 PER_DOMAIN_MIN_INTERVAL = env.int("PER_DOMAIN_MIN_INTERVAL", default=30)
 
 # Email (subscription delivery)
@@ -143,10 +148,14 @@ CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default="redis://redis:6379
 CELERY_TASK_ACKS_LATE = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 CELERY_TASK_DEFAULT_QUEUE = "default"
+CELERY_TASK_SOFT_TIME_LIMIT = env.int("CELERY_TASK_SOFT_TIME_LIMIT", default=60)
+CELERY_TASK_TIME_LIMIT = env.int("CELERY_TASK_TIME_LIMIT", default=90)
 
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "handlers": {"console": {"class": "logging.StreamHandler"}},
     "root": {"handlers": ["console"], "level": env("LOG_LEVEL", default="INFO")},
+    # httpx logs every request at INFO, with the pinned IP instead of the host name
+    "loggers": {"httpx": {"level": "WARNING"}},
 }

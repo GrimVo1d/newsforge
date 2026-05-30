@@ -9,8 +9,12 @@ import httpx
 from django.conf import settings
 from django.core.cache import cache
 
+from apps.core import safe_http
+
 CACHE_TTL_SECONDS = 86_400
+MAX_ROBOTS_BYTES = 200_000
 DEFAULT_USER_AGENT = "newsforge"
+DISALLOW_ALL = "User-agent: *\nDisallow: /\n"
 
 
 def _cache_key(domain: str) -> str:
@@ -20,13 +24,22 @@ def _cache_key(domain: str) -> str:
 def _fetch_robots(domain: str, scheme: str) -> str:
     url = f"{scheme}://{domain}/robots.txt"
     try:
-        with httpx.Client(timeout=5.0, follow_redirects=True) as client:
-            resp = client.get(url, headers={"User-Agent": settings.USER_AGENT})
-        if resp.status_code >= 400:
-            return ""  # treat as allow-all
-        return resp.text[:200_000]
-    except httpx.HTTPError:
-        return ""
+        resp = safe_http.request(
+            "GET",
+            url,
+            headers={"User-Agent": settings.USER_AGENT},
+            timeout=5.0,
+            max_bytes=MAX_ROBOTS_BYTES,
+            allow_http=settings.ALLOW_PLAIN_HTTP,
+            truncate=True,
+        )
+    except safe_http.UnsafeURLError:
+        return DISALLOW_ALL
+    except (safe_http.DeadlineExceededError, httpx.HTTPError):
+        return ""  # unreachable: treat as allow-all, the feed fetch decides
+    if resp.status_code >= 300:
+        return ""  # no robots.txt (or a redirect loop): allow-all
+    return resp.text
 
 
 def is_allowed(url: str, user_agent: str = DEFAULT_USER_AGENT) -> bool:

@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 import feedparser
 from celery import shared_task
+from django.conf import settings
 from django.utils import timezone as djtz
 
 from apps.feeds.fetcher import fetch
@@ -72,7 +73,7 @@ def fetch_feed(self, feed_id: int) -> dict:  # type: ignore[no-untyped-def]
     if body[:3] == b"\xef\xbb\xbf":  # strip UTF-8 BOM that some servers send
         body = body[3:]
     parsed = feedparser.parse(body)
-    entries = list(parsed.entries or [])
+    entries = list(parsed.entries or [])[: settings.MAX_ENTRIES_PER_FETCH]
 
     from tasks.articles import process_article  # local import to avoid celery circular
 
