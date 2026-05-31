@@ -11,6 +11,7 @@ requires-python = ">=3.12"
 authors = [{ name = "GrimVo1d" }]
 dependencies = [
     "Django>=5.2.18,<5.3",
+    "argon2-cffi>=23.1",  # Argon2PasswordHasher, the default hasher
     "djangorestframework>=3.15",
     "djangorestframework-simplejwt>=5.3",
     "django-filter>=24.2",
@@ -23,7 +24,6 @@ dependencies = [
     "httpx>=0.27",
     "bleach>=6.1",
     "langdetect>=1.0.9",
-    "passlib[argon2]>=1.7",
     "prometheus-client>=0.20",
     "gunicorn>=26.0",
 ]

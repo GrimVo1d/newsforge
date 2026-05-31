@@ -1,15 +1,27 @@
 from __future__ import annotations
 
-import secrets
+from typing import Any
 
-from passlib.hash import argon2
 from rest_framework import serializers
 
-from apps.subscriptions.models import Subscription
+from apps.feeds.validators import SSRFError, assert_public_url
+from apps.subscriptions.models import Subscription, new_webhook_secret
+
+MAX_FILTER_IDS = 100
 
 
-class SubscriptionSerializer(serializers.ModelSerializer):
-    webhook_secret = serializers.CharField(read_only=True)
+class SubscriptionSerializer(serializers.ModelSerializer[Subscription]):
+    q = serializers.CharField(max_length=256)
+    feeds = serializers.ListField(
+        child=serializers.IntegerField(min_value=1), max_length=MAX_FILTER_IDS, required=False
+    )
+    tag_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1), max_length=MAX_FILTER_IDS, required=False
+    )
+    webhook_url = serializers.CharField(
+        max_length=2048, required=False, allow_null=True, allow_blank=True
+    )
+    email_to = serializers.EmailField(required=False, allow_null=True, allow_blank=True)
 
     class Meta:
         model = Subscription
@@ -22,36 +34,73 @@ class SubscriptionSerializer(serializers.ModelSerializer):
             "delivery",
             "webhook_url",
             "email_to",
-            "webhook_secret",
             "interval",
             "is_active",
+            "last_notified_at",
             "created_at",
         )
-        read_only_fields = ("created_at",)
+        read_only_fields = ("last_notified_at", "created_at")
 
-    def validate(self, attrs: dict) -> dict:
-        delivery = attrs.get("delivery")
-        if delivery == Subscription.Delivery.WEBHOOK and not attrs.get("webhook_url"):
+    def validate_webhook_url(self, value: str | None) -> str | None:
+        if not value:
+            return None
+        try:
+            assert_public_url(value)
+        except SSRFError as exc:
+            raise serializers.ValidationError(str(exc)) from exc
+        return value
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        def current(field: str) -> Any:
+            if field in attrs:
+                return attrs[field]
+            return getattr(self.instance, field, None)
+
+        delivery = current("delivery")
+        if delivery == Subscription.Delivery.WEBHOOK and not current("webhook_url"):
             raise serializers.ValidationError(
-                {
-                    "code": "missing_webhook_url",
-                    "detail": "webhook_url is required for delivery=webhook",
-                }
+                {"webhook_url": "webhook_url is required for delivery=webhook"}
             )
-        if delivery == Subscription.Delivery.EMAIL and not attrs.get("email_to"):
+        if delivery == Subscription.Delivery.EMAIL and not current("email_to"):
             raise serializers.ValidationError(
-                {
-                    "code": "missing_email_to",
-                    "detail": "email_to is required for delivery=email",
-                }
+                {"email_to": "email_to is required for delivery=email"}
             )
         return attrs
 
-    def create(self, validated: dict) -> Subscription:
+    def create(self, validated: dict[str, Any]) -> Subscription:
         validated["owner"] = self.context["request"].user
-        plaintext_secret = secrets.token_urlsafe(32)
-        validated["webhook_secret"] = argon2.hash(plaintext_secret)
         instance = super().create(validated)
-        # Attach plaintext on the response only, not the DB column.
-        instance.webhook_secret = plaintext_secret
+        self._ensure_secret(instance)
         return instance
+
+    def update(self, instance: Subscription, validated: dict[str, Any]) -> Subscription:
+        instance = super().update(instance, validated)
+        self._ensure_secret(instance)
+        return instance
+
+    def _ensure_secret(self, instance: Subscription) -> None:
+        if instance.delivery == Subscription.Delivery.WEBHOOK and not instance.webhook_secret:
+            instance.webhook_secret = new_webhook_secret()
+            instance.save(update_fields=["webhook_secret"])
+            self._issued_secret = instance.webhook_secret
+
+    def to_representation(self, instance: Subscription) -> dict[str, Any]:
+        data = super().to_representation(instance)
+        # The secret is returned only in the response that issued it.
+        issued = getattr(self, "_issued_secret", None)
+        if issued:
+            data["webhook_secret"] = issued
+        return data
+
+
+class WebhookSecretSerializer(serializers.Serializer[Any]):
+    webhook_secret = serializers.CharField(read_only=True)
+
+
+class DeliveryLogSerializer(serializers.Serializer[Any]):
+    article_id = serializers.IntegerField()
+    delivered_at = serializers.DateTimeField()
+    succeeded = serializers.BooleanField()
+    attempts = serializers.IntegerField()
+    http_status = serializers.IntegerField(allow_null=True)
+    error = serializers.CharField(allow_null=True)
