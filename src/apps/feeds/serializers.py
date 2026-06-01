@@ -7,7 +7,9 @@ from apps.feeds.models import Feed
 from apps.feeds.validators import SSRFError, assert_public_url
 
 
-class FeedSerializer(serializers.ModelSerializer):
+class FeedSerializer(serializers.ModelSerializer[Feed]):
+    """Full view for staff, including crawl state."""
+
     class Meta:
         model = Feed
         fields = (
@@ -51,3 +53,12 @@ class FeedSerializer(serializers.ModelSerializer):
         except SSRFError as exc:
             raise serializers.ValidationError({"code": "ssrf_blocked", "detail": str(exc)}) from exc
         return value
+
+
+class PublicFeedSerializer(serializers.ModelSerializer[Feed]):
+    """What non-staff users see: no crawl state."""
+
+    class Meta:
+        model = Feed
+        fields = ("id", "url", "site_url", "title", "language", "created_at")
+        read_only_fields = fields
