@@ -5,5 +5,8 @@ SELECT
 FROM articles_article a
 WHERE NOT a.is_deleted
   AND a.title %% %(query)s
-ORDER BY rank DESC
+  AND (%(from)s::timestamptz IS NULL OR a.published_at >= %(from)s)
+  AND (%(to)s::timestamptz   IS NULL OR a.published_at <  %(to)s)
+  AND (cardinality(%(feeds)s::bigint[]) = 0 OR a.feed_id = ANY(%(feeds)s))
+ORDER BY rank DESC, a.id DESC
 LIMIT %(limit)s OFFSET %(offset)s;

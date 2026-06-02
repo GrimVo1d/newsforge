@@ -9,6 +9,8 @@ from typing import Any
 from django.db import connection
 
 SUPPORTED_LANGS = ("russian", "english", "simple")
+# Longer queries are phrases, not typos; trigram similarity on them is noise.
+TRGM_MAX_QUERY_CHARS = 24
 _HERE = Path(__file__).parent
 
 
@@ -54,17 +56,15 @@ def run_search(
         "offset": offset,
     }
     sql = SEARCH_DATE_SQL if sort == "date" else SEARCH_RANK_SQL
+    rows = _fetch(sql, params)
+    if rows or len(query) > TRGM_MAX_QUERY_CHARS:
+        return rows
+    # Nothing matched as words: try fuzzy title similarity (typos, partial words).
+    return _fetch(TRGM_FALLBACK_SQL, params)
+
+
+def _fetch(sql: str, params: dict[str, Any]) -> list[dict[str, Any]]:
     with connection.cursor() as cur:
         cur.execute(sql, params)
-        cols = [c[0] for c in cur.description]
-        rows = [dict(zip(cols, row, strict=True)) for row in cur.fetchall()]
-    if rows or len(query) > 24:
-        return rows
-    return run_trgm_fallback(query=query, limit=limit, offset=offset)
-
-
-def run_trgm_fallback(*, query: str, limit: int, offset: int) -> list[dict[str, Any]]:
-    with connection.cursor() as cur:
-        cur.execute(TRGM_FALLBACK_SQL, {"query": query, "limit": limit, "offset": offset})
         cols = [c[0] for c in cur.description]
         return [dict(zip(cols, row, strict=True)) for row in cur.fetchall()]

@@ -107,6 +107,7 @@ REST_FRAMEWORK = {
         "user": env("THROTTLE_USER", default="600/min"),
         # register / token endpoints (ScopedRateThrottle)
         "auth": env("THROTTLE_AUTH", default="10/min"),
+        "search": env("THROTTLE_SEARCH", default="60/min"),
     },
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "EXCEPTION_HANDLER": "apps.core.exceptions.envelope",
