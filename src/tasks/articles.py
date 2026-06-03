@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from celery import shared_task
 
-from apps.articles.normalizer import normalize_entry
+from apps.articles.normalizer import InvalidEntryError, normalize_entry
 from apps.articles.services import upsert_article
 from apps.articles.signals import article_created
 
@@ -20,17 +21,20 @@ def process_article(
     guid: str = "",
     author: str | None = None,
     published_at: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     pub = datetime.fromisoformat(published_at) if published_at else None
-    entry = normalize_entry(
-        url=url,
-        title=title,
-        summary=summary,
-        body=body,
-        guid=guid,
-        author=author,
-        published_at=pub,
-    )
+    try:
+        entry = normalize_entry(
+            url=url,
+            title=title,
+            summary=summary,
+            body=body,
+            guid=guid,
+            author=author,
+            published_at=pub,
+        )
+    except InvalidEntryError as exc:
+        return {"skipped": str(exc)}
     result = upsert_article(feed_id, entry)
     if result.inserted:
         article_created.send(

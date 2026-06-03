@@ -1,21 +1,33 @@
-# ADR-0004 — Dedup precedence: `(feed_id, guid)` first, then `content_hash`
+# ADR-0004 — Dedup inside a feed: `(feed_id, guid)` first, then `(feed_id, content_hash)`
 
-**Status:** accepted
+**Status:** accepted (revised: dedup was global by `content_hash` at first)
 
 ## Context
 
-Articles can re-appear within a feed (re-pub with same guid) or across feeds (syndication with different guids but the same content).
+Articles re-appear within a feed: re-published with the same guid, or with a new guid but the
+same content. Syndicated stories also appear in several feeds.
+
+The first version kept a global unique index on `content_hash`, so two feeds carrying the
+same story shared one row owned by whichever feed surfaced it first. That broke feed filters
+in search and subscriptions (the story was invisible for the second feed), and an entry with
+a guid whose content hash already existed elsewhere failed the insert with a unique violation.
 
 ## Decision
 
-`upsert_article(...)` picks the conflict target by whether `guid` is present:
+Two unique indexes, both scoped to the feed:
 
-1. `guid != ''` → `INSERT ... ON CONFLICT (feed_id, guid) WHERE guid <> '' DO UPDATE SET last_seen_at = excluded.last_seen_at`.
-2. `guid == ''` → fallback to `INSERT ... ON CONFLICT (content_hash)`.
+- `articles_feed_guid_uniq` on `(feed_id, guid) WHERE guid <> ''`;
+- `articles_feed_hash_uniq` on `(feed_id, content_hash)`.
 
-In both cases the conflict updates only `last_seen_at`. We return `(xmax = 0) AS inserted` to distinguish real inserts from updates — used by the receiver of `article_created` to fan out tag-rule and notification work only on real inserts.
+`upsert_article(...)` runs `INSERT ... ON CONFLICT DO NOTHING RETURNING id`. A returned id
+is a real insert. Otherwise the entry is a duplicate of an existing row in the same feed —
+matched by guid first, then by content hash — and only that row's `last_seen_at` is bumped.
+The `article_created` signal (tag rules, instant subscriptions) fires on real inserts only.
 
 ## Consequences
 
-- Two feeds republishing the same article share one DB row (deduped by `content_hash`), with `last_seen_at` bumped on each ingest. The `feed_id` stored on that row is the first feed that surfaced it.
-- A feed that drops `guid` mid-life will create duplicates only on the transition (guid-keyed rows stay, hash-keyed new rows added). Acceptable.
+- The same story in two feeds is stored twice, once per feed; each copy is found by its own
+  feed filter. Search results may show both copies.
+- A feed that drops `guid` mid-life does not create duplicates: the hash still matches.
+- Under concurrent inserts of the same entry, `ON CONFLICT DO NOTHING` waits for the other
+  transaction, so the follow-up lookup finds the committed row.

@@ -1,7 +1,8 @@
 """Normalization helpers for incoming feed entries.
 
 - canonicalize_url: drop UTM query params, drop fragment, lower-case host.
-- sanitize_html: bleach with conservative whitelist.
+- plain_text: titles and authors are stored as text, without markup or entities.
+- sanitize_html: bleach with conservative whitelist (summary / body).
 - content_hash: deterministic sha256.
 - detect_language: langdetect with fixed seed; fallback 'simple'.
 """
@@ -9,6 +10,9 @@
 from __future__ import annotations
 
 import hashlib
+import html
+from dataclasses import dataclass
+from datetime import datetime
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import bleach
@@ -56,6 +60,30 @@ ALLOWED_ATTRIBUTES = {
 _UTM_PREFIXES = ("utm_", "fbclid", "gclid", "yclid", "mc_", "ref")
 _SUPPORTED_LANGS = {"ru": "russian", "en": "english"}
 
+MAX_URL_CHARS = 2048
+MAX_TITLE_CHARS = 1000
+MAX_AUTHOR_CHARS = 255
+
+
+class InvalidEntryError(ValueError):
+    """The feed entry cannot be stored (e.g. its link is not an http(s) URL)."""
+
+
+def plain_text(value: str | None, max_chars: int) -> str:
+    """Strip tags, decode entities and collapse whitespace."""
+    text = bleach.clean(value or "", tags=[], strip=True, strip_comments=True)
+    return " ".join(html.unescape(text).split())[:max_chars]
+
+
+def check_link(url: str) -> str:
+    url = (url or "").strip()
+    parsed = urlparse(url)
+    if parsed.scheme.lower() not in ("http", "https") or not parsed.hostname:
+        raise InvalidEntryError(f"not an http(s) link: {url[:100]!r}")
+    if len(url) > MAX_URL_CHARS:
+        raise InvalidEntryError("link too long")
+    return url
+
 
 def canonicalize_url(url: str) -> str:
     parsed = urlparse(url)
@@ -102,9 +130,6 @@ def content_hash(canonical_url: str, title: str, body: str) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-from dataclasses import dataclass  # noqa: E402
-
-
 @dataclass(slots=True)
 class NormalizedEntry:
     """Result of normalize_entry: ready-for-upsert fields."""
@@ -118,7 +143,7 @@ class NormalizedEntry:
     language: str
     content_hash: str
     guid: str
-    published_at: object  # datetime | None — left as object to avoid heavy imports here
+    published_at: datetime | None
 
 
 def normalize_entry(
@@ -129,20 +154,23 @@ def normalize_entry(
     body: str,
     guid: str = "",
     author: str | None = None,
-    published_at: object = None,
+    published_at: datetime | None = None,
 ) -> NormalizedEntry:
+    """Raises InvalidEntryError for entries that must be skipped."""
+    url = check_link(url)
     canonical = canonicalize_url(url)
+    clean_title = plain_text(title, MAX_TITLE_CHARS)
     clean_summary = sanitize_html(summary)
     clean_body = sanitize_html(body)
-    lang = detect_language(f"{title}\n{clean_summary}\n{clean_body}")
-    digest = content_hash(canonical, title, clean_body or clean_summary)
+    lang = detect_language(f"{clean_title}\n{clean_summary}\n{clean_body}")
+    digest = content_hash(canonical, clean_title, clean_body or clean_summary)
     return NormalizedEntry(
         canonical_url=canonical,
         url=url,
-        title=title.strip(),
+        title=clean_title,
         summary=clean_summary,
         body=clean_body,
-        author=author,
+        author=plain_text(author, MAX_AUTHOR_CHARS) or None,
         language=lang,
         content_hash=digest,
         guid=guid,
