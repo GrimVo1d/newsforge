@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from celery import shared_task
 from django.db import connection, transaction
 from django.utils import timezone
@@ -18,30 +20,27 @@ LIMIT %(limit)s;
 
 
 @shared_task(name="tasks.scheduler.enqueue_due_feeds")
-def enqueue_due_feeds(limit: int = 200) -> dict:
+def enqueue_due_feeds(limit: int = 200) -> dict[str, Any]:
     from tasks.fetcher import fetch_feed
 
-    enqueued: list[int] = []
     with transaction.atomic(), connection.cursor() as cur:
         cur.execute(_DUE_SQL, {"limit": limit})
         ids = [row[0] for row in cur.fetchall()]
         if ids:
-            now = timezone.now()
             cur.execute(
                 "UPDATE feeds_feed "
                 "SET next_fetch_at = now() + (interval_seconds || ' seconds')::interval "
                 "WHERE id = ANY(%(ids)s);",
                 {"ids": ids},
             )
-            for fid in ids:
-                fetch_feed.apply_async(args=[fid])
-                enqueued.append(fid)
-            _ = now
-    return {"enqueued": len(enqueued)}
+    # Queue after commit, so a fast worker never sees the old next_fetch_at.
+    for fid in ids:
+        fetch_feed.apply_async(args=(fid,))
+    return {"enqueued": len(ids)}
 
 
 @shared_task(name="tasks.scheduler.refresh_robots_cache")
-def refresh_robots_cache() -> dict:
+def refresh_robots_cache() -> dict[str, Any]:
     """Walk active feeds and warm robots cache for each domain (lazy)."""
     from urllib.parse import urlparse
 
@@ -59,7 +58,7 @@ def refresh_robots_cache() -> dict:
 
 
 @shared_task(name="tasks.scheduler.cleanup_old_articles")
-def cleanup_old_articles(days: int = 365) -> dict:
+def cleanup_old_articles(days: int = 365) -> dict[str, Any]:
     from datetime import timedelta
 
     cutoff = timezone.now() - timedelta(days=days)

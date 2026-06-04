@@ -137,11 +137,11 @@ def test_fanout_respects_tag_filter(user, hook, make_article, monkeypatch):
     hook.tag_ids = [tag.id]
     hook.save()
 
-    queued: list[list[int]] = []
+    queued: list[tuple[int, int]] = []
     monkeypatch.setattr(deliver, "apply_async", lambda args: queued.append(args))
     assert fanout_instant(tagged.id) == {"fanout": 1}
     assert fanout_instant(untagged.id) == {"fanout": 0}
-    assert queued == [[hook.id, tagged.id]]
+    assert queued == [(hook.id, tagged.id)]
 
 
 def test_digest_matches_in_article_language(user, make_article, monkeypatch):
@@ -154,11 +154,11 @@ def test_digest_matches_in_article_language(user, make_article, monkeypatch):
         email_to="me@example.internal",
         interval=Subscription.Interval.DAILY,
     )
-    queued: list[list[int]] = []
+    queued: list[tuple[int, int]] = []
     monkeypatch.setattr(deliver, "apply_async", lambda args: queued.append(args))
 
     assert daily_digest() == {"deliveries": 1}
-    assert queued == [[sub.id, ru.id]]
+    assert queued == [(sub.id, ru.id)]
 
     # The next run only looks at articles created since the previous one.
     sub.refresh_from_db()

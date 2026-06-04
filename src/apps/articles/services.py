@@ -8,6 +8,7 @@ is a duplicate: the existing row only gets its ``last_seen_at`` bumped.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from django.db import connection
 
@@ -46,7 +47,7 @@ RETURNING id;
 
 
 def upsert_article(feed_id: int, entry: NormalizedEntry) -> UpsertResult:
-    params = {
+    params: dict[str, Any] = {
         "feed_id": feed_id,
         "guid": entry.guid or "",
         "canonical_url": entry.canonical_url,

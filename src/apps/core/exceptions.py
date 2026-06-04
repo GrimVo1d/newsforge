@@ -5,12 +5,14 @@ Wired in settings via REST_FRAMEWORK['EXCEPTION_HANDLER'].
 
 from __future__ import annotations
 
+from typing import Any
+
 from rest_framework import exceptions
 from rest_framework.response import Response
 from rest_framework.views import exception_handler
 
 
-def envelope(exc, context) -> Response | None:  # type: ignore[no-untyped-def]
+def envelope(exc: Exception, context: dict[str, Any]) -> Response | None:
     response = exception_handler(exc, context)
     if response is None:
         return None

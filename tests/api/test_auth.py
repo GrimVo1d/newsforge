@@ -60,3 +60,14 @@ def test_jwt_lifetimes_are_applied():
     }
     assert actual == expected
     assert settings.SIMPLE_JWT["ACCESS_TOKEN_LIFETIME"] == expected["access"]
+
+
+def test_production_password_hashers_are_installed():
+    # Tests run with a fast MD5 hasher; make sure the real ones can load their libraries.
+    from django.utils.module_loading import import_string
+
+    from newsforge.settings import base
+
+    for path in base.PASSWORD_HASHERS:
+        hasher = import_string(path)()
+        assert hasher.verify("pw", hasher.encode("pw", hasher.salt()))

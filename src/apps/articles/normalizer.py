@@ -71,7 +71,7 @@ class InvalidEntryError(ValueError):
 
 def plain_text(value: str | None, max_chars: int) -> str:
     """Strip tags, decode entities and collapse whitespace."""
-    text = bleach.clean(value or "", tags=[], strip=True, strip_comments=True)
+    text: str = bleach.clean(value or "", tags=[], strip=True, strip_comments=True)
     return " ".join(html.unescape(text).split())[:max_chars]
 
 
@@ -105,13 +105,14 @@ def canonicalize_url(url: str) -> str:
 
 
 def sanitize_html(html: str) -> str:
-    return bleach.clean(
+    cleaned: str = bleach.clean(
         html or "",
         tags=ALLOWED_TAGS,
         attributes=ALLOWED_ATTRIBUTES,
         strip=True,
         strip_comments=True,
     )
+    return cleaned
 
 
 def detect_language(text: str) -> str:
@@ -122,7 +123,7 @@ def detect_language(text: str) -> str:
         code = detect(snippet[:4096])
     except LangDetectException:
         return "simple"
-    return _SUPPORTED_LANGS.get(code, "simple")
+    return _SUPPORTED_LANGS.get(str(code), "simple")
 
 
 def content_hash(canonical_url: str, title: str, body: str) -> str:

@@ -50,7 +50,7 @@ def daily_digest() -> dict[str, int]:
             )
             article_ids = [r[0] for r in cur.fetchall()]
         for aid in article_ids:
-            deliver.apply_async(args=[sub.id, aid])
+            deliver.apply_async(args=(sub.id, aid))
             sent += 1
         sub.last_notified_at = now
         sub.save(update_fields=["last_notified_at"])

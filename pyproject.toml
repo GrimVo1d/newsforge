@@ -66,6 +66,11 @@ plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
 mypy_path = "src"
 exclude = ["migrations/"]
 
+[[tool.mypy.overrides]]
+# No type information published for these.
+module = ["bleach", "environ", "feedparser", "langdetect", "langdetect.*"]
+ignore_missing_imports = true
+
 [tool.django-stubs]
 django_settings_module = "newsforge.settings.test"
 
@@ -91,4 +96,4 @@ branch = true
 [tool.coverage.report]
 show_missing = true
 skip_covered = false
-fail_under = 30
+fail_under = 85

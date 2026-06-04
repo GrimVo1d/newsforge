@@ -189,5 +189,5 @@ def fanout_instant(article_id: int) -> dict[str, int]:
         cur.execute(_MATCH_INSTANT_SQL, {"aid": article_id})
         ids = [r[0] for r in cur.fetchall()]
     for sid in ids:
-        deliver.apply_async(args=[sid, article_id])
+        deliver.apply_async(args=(sid, article_id))
     return {"fanout": len(ids)}
