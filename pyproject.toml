@@ -68,8 +68,13 @@ exclude = ["migrations/"]
 
 [[tool.mypy.overrides]]
 # No type information published for these.
-module = ["bleach", "environ", "feedparser", "langdetect", "langdetect.*"]
+module = ["bleach", "django_filters", "environ", "feedparser", "langdetect", "langdetect.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# FilterSet comes from the untyped django_filters.
+module = ["apps.articles.views"]
+disallow_subclassing_any = false
 
 [tool.django-stubs]
 django_settings_module = "newsforge.settings.test"

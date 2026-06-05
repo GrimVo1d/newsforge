@@ -7,6 +7,7 @@ urlpatterns = [
     path("auth/token/", TokenView.as_view(), name="auth-token"),
     path("auth/token/refresh/", TokenRefreshThrottledView.as_view(), name="auth-token-refresh"),
     path("", include("apps.feeds.urls")),
+    path("", include("apps.articles.urls")),
     path("", include("apps.tags.urls")),
     path("", include("apps.search.urls")),
     path("", include("apps.subscriptions.urls")),
