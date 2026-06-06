@@ -150,7 +150,8 @@ def deliver(subscription_id: int, article_id: int) -> dict[str, Any]:
         _record(sub.id, article.id, succeeded=False, http_status=status_code, error=repr(exc))
         raise
 
-    ok = status < 400
+    # Redirects are not followed, so a 3xx answer means the payload did not arrive.
+    ok = 200 <= status < 300  # SMTP "250 OK" for email falls in the same range
     _record(
         sub.id,
         article.id,

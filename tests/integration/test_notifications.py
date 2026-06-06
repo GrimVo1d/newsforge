@@ -96,10 +96,11 @@ def test_server_errors_are_logged_and_retried(hook, article, receiver):
     assert (log.succeeded, log.http_status, log.attempts, log.error) == (True, 204, 3, None)
 
 
-def test_client_errors_are_final(hook, article, receiver):
-    receiver.status = 410
-    assert deliver(hook.id, article.id) == {"status": 410, "succeeded": False}
-    assert DeliveryLog.objects.get(subscription=hook).error == "receiver answered 410"
+@pytest.mark.parametrize("status", [301, 410])
+def test_redirects_and_client_errors_are_final(hook, article, receiver, status):
+    receiver.status = status
+    assert deliver(hook.id, article.id) == {"status": status, "succeeded": False}
+    assert DeliveryLog.objects.get(subscription=hook).error == f"receiver answered {status}"
 
 
 def test_network_errors_are_logged_and_retried(hook, article, receiver):
