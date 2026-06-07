@@ -1,81 +1,103 @@
-# RUNBOOK — newsforge
+# Runbook
 
-Operational playbook: 5 alerts + remediation.
+Common incidents, how to confirm them and what to do. `/metrics` exports only the default
+process and Python collectors, so most checks below are SQL against the database
+(`docker compose exec db psql -U nf -d newsforge`) or Celery inspection.
 
-## Alert 1 — Feed disabled storm (`disabled_feeds_total` > 5 in 1h)
+## Many feeds paused
 
-**Likely cause:** a class of feeds is unreachable (provider outage, our egress blocked, robots policy change).
+**Symptom:** feeds stop updating; staff see `disabled_until` in the future on many feeds.
 
 **Diagnosis:**
 ```sql
-SELECT host(url) AS host, count(*) AS n
+SELECT split_part(url, '/', 3) AS host, last_status, count(*) AS feeds
 FROM feeds_feed
-WHERE disabled_until > now() - interval '24h'
-GROUP BY 1 ORDER BY 2 DESC LIMIT 20;
+WHERE disabled_until > now()
+GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 20;
 ```
 
 **Remediation:**
-1. If clustered around one host → confirm with `curl -I` from the worker. If DNS / TCP fails, defer until provider recovers.
-2. If clustered around `robots_blocked` → check `apps.feeds.robots.invalidate(domain)` and re-fetch `robots.txt`.
-3. To force re-enable: `UPDATE feeds_feed SET disabled_until = NULL, consecutive_errors = 0 WHERE id IN (...)` then `POST /api/v1/feeds/{id}/refresh/`.
+1. One host, `network_error` / `http_error` → the provider is down or blocks us; wait, or
+   check from the worker container.
+2. `ssrf_blocked` → the host now resolves to a private address or redirects to one (or to
+   plain `http`); this is intended, fix the feed URL.
+3. `robots_blocked` → the site's robots.txt disallows the feed; drop the cached copy with
+   `python manage.py shell -c "from apps.feeds.robots import invalidate; invalidate('<host>')"`
+   only if it was changed.
+4. To resume a feed early:
+   `UPDATE feeds_feed SET disabled_until = NULL, consecutive_errors = 0 WHERE id IN (...);`
+   then `POST /api/v1/feeds/{id}/refresh/` as staff.
 
-## Alert 2 — FTS index drift (search returns 0 for content known to be present)
+## Search misses articles that exist
 
-**Likely cause:** trigger disabled / not migrated / stopped firing on legacy rows.
+**Likely cause:** rows with an empty `tsv` (trigger missing after a manual restore), or the
+wrong `lang` in the request.
 
 **Diagnosis:**
 ```sql
-SELECT count(*) AS missing
-FROM articles_article WHERE tsv IS NULL AND NOT is_deleted;
+SELECT count(*) FROM articles_article WHERE tsv IS NULL AND NOT is_deleted;
+SELECT tgname FROM pg_trigger WHERE tgrelid = 'articles_article'::regclass AND NOT tgisinternal;
 ```
 
-**Remediation:**
-```
-make reindex-tsv
-```
-(or directly: `UPDATE articles_article SET title = title;` — fires the BEFORE-UPDATE trigger). Done in batches:
+**Remediation:** if the trigger is missing, recreate the function and trigger by running the
+`TRIGGER_SQL` statement from `src/apps/articles/migrations/0001_initial.py` in psql. Then
+rebuild the vectors: `make reindex-tsv`, or in batches on a large table:
 ```sql
 UPDATE articles_article SET title = title
 WHERE id IN (SELECT id FROM articles_article WHERE tsv IS NULL LIMIT 10000);
 ```
+If the rows are fine, check that the query uses the article's language (`lang=ru` for
+Russian content); see [SEARCH.md](SEARCH.md).
 
-## Alert 3 — Webhook backpressure (`celery_queue_default` > 10000)
+## Webhook deliveries piling up
 
-**Likely cause:** a slow receiver is causing `deliver` retries to pile up.
+**Symptom:** the `default` queue grows; one receiver is slow or failing.
 
-**Diagnosis:** inspect `subscriptions_deliverylog` for the noisy `subscription_id`:
+**Diagnosis:**
 ```sql
-SELECT subscription_id, count(*) AS attempts, max(delivered_at)
+SELECT subscription_id, count(*) AS pending, sum(attempts) AS attempts, max(delivered_at)
 FROM subscriptions_deliverylog
-WHERE delivered_at > now() - interval '1h' AND error IS NOT NULL
-GROUP BY 1 ORDER BY 2 DESC LIMIT 10;
+WHERE NOT succeeded AND delivered_at > now() - interval '1 hour'
+GROUP BY 1 ORDER BY 3 DESC LIMIT 10;
 ```
+`docker compose exec worker celery -A newsforge inspect scheduled` lists retries waiting
+for their countdown.
 
 **Remediation:**
-1. Quarantine: `UPDATE subscriptions_subscription SET is_active = false WHERE id = ...`.
-2. Drain queue: monitor `celery -A newsforge inspect active` until empty.
-3. Re-enable after the receiver recovers; the unique constraint on `delivery_log` prevents replay duplicates.
+1. Pause the subscription: `UPDATE subscriptions_subscription SET is_active = false WHERE id = ...;`
+   — queued and retried tasks for it then end with `DoesNotExist` instead of calling out.
+2. Re-enable once the receiver is back. Articles matched while it was paused are not
+   re-sent; pairs that never succeeded show `succeeded = false` in the log.
 
-## Alert 4 — Beat scheduler stalled
+## Beat stopped
 
-**Likely cause:** `beat` container died and was not restarted; `enqueue_due_feeds` hasn't fired in > 5 minutes.
+**Symptom:** no new articles; `next_fetch_at` of active feeds is in the past.
 
-**Diagnosis:** `docker compose ps beat` — is it running? If yes, check logs for stuck `dispatcher` loop.
+**Diagnosis:**
+```sql
+SELECT count(*) FROM feeds_feed
+WHERE is_active AND NOT is_deleted AND next_fetch_at < now() - interval '5 minutes'
+  AND (disabled_until IS NULL OR disabled_until <= now());
+```
+`docker compose ps beat` and `docker compose logs --tail 50 beat`.
 
-**Remediation:** `docker compose restart beat`. Confirm next iteration: `tail -F` until you see `enqueue-due-feeds`.
+**Remediation:** `docker compose restart beat`; within a minute the log shows
+`Scheduler: Sending due task enqueue-due-feeds`. Run only one `beat`.
 
-## Alert 5 — Storage growth (`articles_article` > 80% disk)
-
-**Likely cause:** retention policy not running or window too generous.
+## Database growing
 
 **Diagnosis:**
 ```sql
 SELECT pg_size_pretty(pg_total_relation_size('articles_article'));
-SELECT date_trunc('month', fetched_at), count(*)
+SELECT date_trunc('month', fetched_at) AS month, count(*)
 FROM articles_article GROUP BY 1 ORDER BY 1 DESC LIMIT 12;
 ```
 
 **Remediation:**
-1. Run `tasks.scheduler.cleanup_old_articles(days=180)` manually (`celery -A newsforge call tasks.scheduler.cleanup_old_articles --args='[180]'`).
-2. Confirm `VACUUM ANALYZE articles_article;` reclaims space.
-3. If volumes are truly large, schedule partitioning by `published_at` (see DEPLOYMENT.md scale-out).
+1. Soft-delete older articles sooner than the weekly default of 365 days:
+   `docker compose exec worker celery -A newsforge call tasks.scheduler.cleanup_old_articles --args='[180]'`.
+2. Soft-deleted rows stay in the table. Remove them through the ORM, which also deletes their
+   tags and delivery log rows (the foreign keys have no `ON DELETE CASCADE` in the database):
+   `python manage.py shell -c "from apps.articles.models import Article; Article.objects.filter(is_deleted=True).delete()"`,
+   then `VACUUM ANALYZE articles_article;`.
+3. For sustained volume, partition by `published_at` (see [DEPLOYMENT.md](DEPLOYMENT.md)).

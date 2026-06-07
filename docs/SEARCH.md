@@ -1,4 +1,33 @@
-# SEARCH — newsforge
+# Search
+
+## API
+
+`GET /api/v1/search/` — public, throttled (`THROTTLE_SEARCH`, 60 requests per minute by
+default, on top of the anonymous / per-user limits).
+
+| Parameter | Default | Values |
+|---|---|---|
+| `q` | — | up to 256 characters, web-search syntax (below); empty → empty result |
+| `lang` | `simple` | `russian` / `ru`, `english` / `en`, `simple` — how `q` is parsed |
+| `sort` | `rank` | `rank` (relevance, then newest) or `date` (newest first, no snippets) |
+| `feed` | all | feed ids: `feed=1&feed=2` or `feed=1,2`, at most 50 |
+| `from`, `to` | — | ISO 8601 datetimes, `from <= published_at < to` |
+| `limit` | 20 | 1–100 |
+| `offset` | 0 | 0–10000 |
+
+Invalid parameters give `400` with `{"code": "validation_error", "detail": {...}}`.
+
+Response: `{"count": <hits on this page>, "results": [...]}`; each hit has `id`, `title`,
+`summary`, `url`, `feed_id`, `published_at`, `language`, `rank` and `highlight`. `count` is the
+size of the returned page, not the total number of matches: to page through results, request
+the next `offset` until a page comes back shorter than `limit`.
+
+Query syntax (`websearch_to_tsquery`): words are AND-ed, `"quoted phrase"`, `or`, and `-word`
+to exclude. `unaccent` is applied to both the query and the index, so `café` matches `cafe`.
+
+Pass `lang` matching the content you are looking for: a Russian query parsed with `simple`
+does not stem, so `обновления` will not match `обновление`.
+
 
 ## Ranking weights
 
@@ -19,7 +48,10 @@ Normalization mask: `32` (divide rank by `1 + log(doc_length)`). Without it long
 |---|---|
 | `russian`, `ru` | `russian` |
 | `english`, `en` | `english` |
-| anything else / empty | `simple` |
+| `simple` / not given | `simple` |
+
+Each article stores the configuration it was indexed with (detected at ingest). Subscriptions
+parse their query in the language of each candidate article.
 
 The `simple` config does no stemming and no stop-word removal — it is the fall-through for unsupported languages and very short input. We never interpolate the language string into SQL directly; `apps.search.queries.coerce_lang()` whitelists.
 
@@ -31,27 +63,30 @@ Parameters used:
 MaxFragments=2, MinWords=5, MaxWords=20, StartSel=<b>, StopSel=</b>
 ```
 
-`MaxFragments=2` keeps the response payload bounded. Highlighting is the most expensive operator in the query and runs only over the LIMITed result page — never as a filter.
+`MaxFragments=2` keeps the response payload bounded. Highlighting is the most expensive
+operator in the query, so `search_rank.sql` computes it in an outer query over the already
+limited page, on the first 2000 characters of the summary. The snippet contains `<b>` marks
+inside sanitized summary HTML; render it as HTML only after your own sanitization, or strip
+the tags.
 
 ## Fuzzy fallback (`pg_trgm`)
 
-When `websearch_to_tsquery` yields 0 rows AND `len(q) <= 24`, the client may fall back to:
+When the full-text query finds nothing and `q` is at most 24 characters, the endpoint
+answers from `queries/trgm_fallback.sql` instead: trigram similarity of `q` against titles
+(`title % q`, served by the `articles_title_trgm_idx` GIN index), with the same `feed`,
+`from`, `to`, `limit` and `offset` filters. `rank` is then the similarity (0–1) and
+`highlight` is empty.
 
-```sql
-SELECT id, title, similarity(title, $1) AS sim
-FROM articles_article
-WHERE NOT is_deleted AND title %% $1
-ORDER BY sim DESC
-LIMIT 20;
-```
-
-This catches misspellings ("djnago" → "django"). Threshold via the `pg_trgm.similarity_threshold` GUC.
+This catches misspellings ("djnago" → "django"). The cut-off is the
+`pg_trgm.similarity_threshold` setting (0.3 by default).
 
 ## Adding a new language
 
 1. `CREATE TEXT SEARCH CONFIGURATION <name> ( COPY = pg_catalog.simple );` then `ALTER` to wire the appropriate dict.
 2. Drop stopword / synonym files into PG `$SHAREDIR/tsearch_data/`.
-3. Add the regconfig name to `apps.search.queries.SUPPORTED_LANGS`.
+3. Add the regconfig name to `apps.search.queries.SUPPORTED_LANGS`, to `LANG_CHOICES` in
+   `apps.search.serializers`, to `apps.feeds.models.Language`, and map its langdetect code in
+   `apps.articles.normalizer._SUPPORTED_LANGS`.
 4. (Optional) backfill: `UPDATE articles_article SET language='<name>' WHERE feed_id IN (...);` — the BEFORE-UPDATE trigger reindexes affected rows.
 
 ## Why a trigger and not `GENERATED ALWAYS`
