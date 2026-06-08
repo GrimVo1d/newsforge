@@ -19,8 +19,9 @@ GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 20;
 **Remediation:**
 1. One host, `network_error` / `http_error` → the provider is down or blocks us; wait, or
    check from the worker container.
-2. `ssrf_blocked` → the host now resolves to a private address or redirects to one (or to
-   plain `http`); this is intended, fix the feed URL.
+2. `ssrf_blocked` → the host now resolves to a private address, does not resolve, or
+   redirects to such a host (or to plain `http`); this is intended, fix the feed URL. The
+   worker log has the resolved address (`apps.core.safe_http`, level `INFO`).
 3. `robots_blocked` → the site's robots.txt disallows the feed; drop the cached copy with
    `python manage.py shell -c "from apps.feeds.robots import invalidate; invalidate('<host>')"`
    only if it was changed.

@@ -78,3 +78,23 @@ def test_fuzzy_fallback_keeps_filters(api, articles, feed):
     # "Djangoo" is not a word in the index, so the trigram fallback answers.
     assert api.get(URL, {"q": "Djangoo releese"}).json()["count"] >= 1
     assert api.get(URL, {"q": "Djangoo releese", "feed": 999_999}).json()["count"] == 0
+
+
+def test_highlight_is_plain_text_with_marks(api, make_article):
+    make_article(
+        "Pixel",
+        summary='<p>Tracking <img src="https://t.example.internal/p.gif"> django '
+        '<a href="https://example.internal/">release</a> &amp; notes</p>',
+        language="english",
+    )
+    (hit,) = api.get(URL, {"q": "django", "lang": "en"}).json()["results"]
+    assert "<img" not in hit["highlight"] and "<a" not in hit["highlight"]
+    assert "<b>django</b>" in hit["highlight"].lower()
+    assert "&amp;" in hit["highlight"]
+
+
+def test_articles_of_deleted_feeds_are_not_found(api, articles, feed):
+    feed.is_deleted = True
+    feed.save()
+    assert api.get(URL, {"q": "django"}).json()["count"] == 0
+    assert api.get(URL, {"q": "Djangoo releese"}).json()["count"] == 0

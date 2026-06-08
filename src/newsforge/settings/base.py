@@ -9,7 +9,8 @@ import environ
 env = environ.Env()
 
 # Only for local development; prod.py requires SECRET_KEY from the environment.
-SECRET_KEY = env("SECRET_KEY", default="dev-only-insecure-secret-key-do-not-use-in-prod")
+DEV_SECRET_KEY = "dev-only-insecure-secret-key-do-not-use-in-prod"
+SECRET_KEY = env("SECRET_KEY", default=DEV_SECRET_KEY)
 DEBUG = env.bool("DEBUG", default=False)
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
@@ -109,6 +110,10 @@ REST_FRAMEWORK = {
         "auth": env("THROTTLE_AUTH", default="10/min"),
         "search": env("THROTTLE_SEARCH", default="60/min"),
     },
+    # Throttles key anonymous clients by address. With NUM_PROXIES unset DRF would use the
+    # whole client-supplied X-Forwarded-For header, so every request could pick its own bucket.
+    # 0 = use REMOTE_ADDR; N = take the address appended by the N-th trusted proxy.
+    "NUM_PROXIES": env.int("NUM_PROXIES", default=0),
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "EXCEPTION_HANDLER": "apps.core.exceptions.envelope",
 }
@@ -130,6 +135,7 @@ MAX_RESPONSE_BYTES = env.int("MAX_RESPONSE_BYTES", default=5_242_880)
 # Entries taken from one fetch; the rest of an oversized feed is ignored.
 MAX_ENTRIES_PER_FETCH = env.int("MAX_ENTRIES_PER_FETCH", default=200)
 MIN_FEED_INTERVAL_SECONDS = 300
+MAX_SUBSCRIPTIONS_PER_USER = env.int("MAX_SUBSCRIPTIONS_PER_USER", default=20)
 # Allow plain-http feed / webhook URLs (https only by default).
 ALLOW_PLAIN_HTTP = env.bool("ALLOW_PLAIN_HTTP", default=False)
 PER_DOMAIN_MIN_INTERVAL = env.int("PER_DOMAIN_MIN_INTERVAL", default=30)

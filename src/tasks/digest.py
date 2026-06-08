@@ -14,6 +14,7 @@ MAX_ARTICLES_PER_DIGEST = 100
 _MATCH_SQL = """
 SELECT a.id
 FROM articles_article a
+JOIN feeds_feed f ON f.id = a.feed_id AND NOT f.is_deleted
 WHERE NOT a.is_deleted
   AND a.created_at >= %(since)s
   AND a.tsv @@ websearch_to_tsquery(a.language::regconfig, unaccent(%(query)s))

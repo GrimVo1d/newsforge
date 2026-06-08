@@ -17,6 +17,7 @@ class FeedStatus(models.TextChoices):
     NETWORK_ERROR = "network_error", "network_error"
     PARSE_ERROR = "parse_error", "parse_error"
     ROBOTS_BLOCKED = "robots_blocked", "robots_blocked"
+    SSRF_BLOCKED = "ssrf_blocked", "ssrf_blocked"
     TOO_LARGE = "too_large", "too_large"
 
 

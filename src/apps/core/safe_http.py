@@ -9,14 +9,16 @@ Every hop of a request goes through the same checks, which closes the usual SSRF
   while ``Host`` and TLS SNI / certificate verification still use the original hostname;
 - redirects are followed manually and each target is checked again;
 - an overall deadline covers all hops and the body download;
-- the body is read in chunks and capped.
+- the body is read in chunks and capped *after* decompression (gzip bombs stop at the cap).
 """
 
 from __future__ import annotations
 
 import ipaddress
+import logging
 import socket
 import time
+import zlib
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlsplit
 
@@ -26,6 +28,26 @@ IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 
 ALLOWED_PORTS = {"http": 80, "https": 443}
 REDIRECT_CODES = {301, 302, 303, 307, 308}
+# The body is decoded here, so only advertise what _read_body can decode with a size limit.
+ACCEPT_ENCODING = "gzip, deflate"
+# Shown to API users instead of the resolved address, so errors do not map internal DNS.
+NOT_PUBLIC = "host does not resolve to a public address"
+
+logger = logging.getLogger(__name__)
+
+# IPv6 ranges whose last 32 bits are an IPv4 address the packet may end up at. Python's
+# is_global treats some of them as global (e.g. NAT64 64:ff9b::/96), so the embedded address
+# is checked instead.
+_EMBEDS_IPV4 = (
+    ipaddress.IPv6Network("::/96"),  # IPv4-compatible (deprecated)
+    ipaddress.IPv6Network("::ffff:0:0/96"),  # IPv4-mapped
+    ipaddress.IPv6Network("::ffff:0:0:0/96"),  # IPv4-translated
+    ipaddress.IPv6Network("64:ff9b::/96"),  # NAT64 well-known prefix
+)
+_NEVER_PUBLIC = (
+    ipaddress.IPv6Network("64:ff9b:1::/48"),  # NAT64 local use
+    ipaddress.IPv6Network("fec0::/10"),  # site-local (deprecated)
+)
 
 
 class UnsafeURLError(ValueError):
@@ -68,8 +90,13 @@ class Response:
 
 
 def _is_public(ip: IPAddress) -> bool:
-    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
-        return _is_public(ip.ipv4_mapped)
+    if isinstance(ip, ipaddress.IPv6Address):
+        if any(ip in net for net in _NEVER_PUBLIC):
+            return False
+        if any(ip in net for net in _EMBEDS_IPV4):
+            return _is_public(ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF))
+        if ip.sixtofour is not None:
+            return _is_public(ip.sixtofour)
     return ip.is_global and not ip.is_multicast
 
 
@@ -98,16 +125,18 @@ def resolve(url: str, *, allow_http: bool = False) -> Target:
     try:
         infos = socket.getaddrinfo(host, default_port, type=socket.SOCK_STREAM)
     except (socket.gaierror, UnicodeError) as exc:
-        raise UnsafeURLError(f"dns resolution failed for {host!r}") from exc
+        logger.info("dns resolution failed for %r: %s", host, exc)
+        raise UnsafeURLError(NOT_PUBLIC) from exc
 
     addresses: list[IPAddress] = []
     for *_, sockaddr in infos:
         ip = ipaddress.ip_address(str(sockaddr[0]).split("%", 1)[0])
         if not _is_public(ip):
-            raise UnsafeURLError(f"{host!r} resolves to non-public address {ip}")
+            logger.info("%r resolves to non-public address %s", host, ip)
+            raise UnsafeURLError(NOT_PUBLIC)
         addresses.append(ip)
     if not addresses:
-        raise UnsafeURLError(f"no addresses for {host!r}")
+        raise UnsafeURLError(NOT_PUBLIC)
 
     path = parts.path or "/"
     if parts.query:
@@ -147,7 +176,11 @@ def request(
             req = client.build_request(
                 method,
                 target.pinned_url,
-                headers={**(headers or {}), "Host": host_header},
+                headers={
+                    **(headers or {}),
+                    "Host": host_header,
+                    "Accept-Encoding": ACCEPT_ENCODING,
+                },
                 content=content,
                 timeout=remaining,
                 extensions={"sni_hostname": target.host} if target.scheme == "https" else None,
@@ -169,6 +202,19 @@ def request(
     raise AssertionError("unreachable")  # pragma: no cover
 
 
+def _decompressor(resp: httpx.Response, first: bytes) -> zlib._Decompress | None:
+    encoding = resp.headers.get("content-encoding", "").strip().lower()
+    if encoding in ("", "identity"):
+        return None
+    if encoding in ("gzip", "x-gzip"):
+        return zlib.decompressobj(16 + zlib.MAX_WBITS)
+    if encoding == "deflate":
+        # "deflate" is meant to be zlib-wrapped, but some servers send a raw stream.
+        wrapped = len(first) >= 2 and first[0] & 0x0F == 8 and (first[0] << 8 | first[1]) % 31 == 0
+        return zlib.decompressobj(zlib.MAX_WBITS if wrapped else -zlib.MAX_WBITS)
+    raise httpx.DecodingError(f"unsupported content-encoding: {encoding}", request=resp.request)
+
+
 def _read_body(
     resp: httpx.Response, max_bytes: int, deadline: float, truncate: bool
 ) -> tuple[bytes, bool]:
@@ -176,12 +222,31 @@ def _read_body(
     if declared and declared.isdigit() and int(declared) > max_bytes and not truncate:
         raise ResponseTooLargeError(declared)
     buf = bytearray()
-    for chunk in resp.iter_bytes():
-        if time.monotonic() > deadline:
-            raise DeadlineExceededError(str(resp.request.url))
-        buf.extend(chunk)
-        if len(buf) > max_bytes:
-            if truncate:
-                return bytes(buf[:max_bytes]), True
-            raise ResponseTooLargeError(len(buf))
+    limit = max_bytes + 1  # one byte over the cap is enough to know it is too large
+    decoder: zlib._Decompress | None = None
+    started = False
+    try:
+        for chunk in resp.iter_raw():
+            if time.monotonic() > deadline:
+                raise DeadlineExceededError(str(resp.request.url))
+            if not started:
+                decoder, started = _decompressor(resp, chunk), True
+            if decoder is None:
+                buf.extend(chunk)
+            else:
+                # Decompress at most up to the cap; the rest of a bomb is never expanded.
+                data = chunk
+                while data and len(buf) < limit:
+                    buf.extend(decoder.decompress(data, limit - len(buf)))
+                    data = decoder.unconsumed_tail
+            if len(buf) > max_bytes:
+                break
+        if decoder is not None and len(buf) <= max_bytes:
+            buf.extend(decoder.flush())
+    except zlib.error as exc:
+        raise httpx.DecodingError(f"invalid compressed body: {exc}", request=resp.request) from exc
+    if len(buf) > max_bytes:
+        if truncate:
+            return bytes(buf[:max_bytes]), True
+        raise ResponseTooLargeError(len(buf))
     return bytes(buf), False

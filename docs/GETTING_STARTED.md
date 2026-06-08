@@ -116,7 +116,8 @@ and body; `match` is `any` or `all`; an optional `language` limits a rule to one
 
 A subscription is a saved query plus optional `feeds` and `tag_ids` filters. `interval` is
 `instant` (checked for every new article) or `daily` (a batch at 09:00 UTC covering
-articles since the previous run, at most 100).
+articles since the previous run, at most 100). Each user can keep up to 20 subscriptions
+(`MAX_SUBSCRIPTIONS_PER_USER`).
 
 ### Email
 
@@ -208,6 +209,6 @@ the production settings.
 | `make up` hangs on `api` | `make logs`; `migrate` must exit 0 first (`docker compose logs migrate`) |
 | feed stays without `last_fetched_at` | `docker compose logs worker beat`; is the feed `is_active` and not `disabled_until`? |
 | `last_status: robots_blocked` | the site's robots.txt disallows the feed path for `USER_AGENT` |
-| `last_status: ssrf_blocked` | the host resolves to a private address, or a redirect leads to one or to `http://` |
+| `last_status: ssrf_blocked` | the host resolves to a private address or does not resolve, or a redirect leads to such a host or to `http://`; the worker log has the details |
 | no emails in Mailpit | `GET /subscriptions/{id}/deliveries/`; does the query match the article's language? |
 | `429` responses | throttling; tune `THROTTLE_*` |

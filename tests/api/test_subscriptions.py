@@ -140,3 +140,19 @@ def test_deliveries_endpoint(user_api, make_article):
             "error": "x",
         }
     ]
+
+
+def test_subscriptions_per_user_are_capped(user_api, settings):
+    settings.MAX_SUBSCRIPTIONS_PER_USER = 2
+    body = {"name": "mail", "q": "django", "delivery": "email", "email_to": "me@example.internal"}
+    assert user_api.post(URL, body, format="json").status_code == 201
+    assert user_api.post(URL, body, format="json").status_code == 201
+    resp = user_api.post(URL, body, format="json")
+    assert resp.status_code == 400
+    assert "at most 2" in str(resp.json())
+
+
+def test_rejected_webhook_url_does_not_reveal_addresses(user_api):
+    resp = user_api.post(URL, _webhook(webhook_url="https://evil.example.internal/"), format="json")
+    assert resp.status_code == 400
+    assert "10.0.0.7" not in str(resp.json())

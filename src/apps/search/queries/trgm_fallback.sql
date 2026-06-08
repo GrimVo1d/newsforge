@@ -3,6 +3,7 @@ SELECT
   similarity(a.title, %(query)s)::float AS rank,
   '' AS highlight
 FROM articles_article a
+JOIN feeds_feed f ON f.id = a.feed_id AND NOT f.is_deleted
 WHERE NOT a.is_deleted
   AND a.title %% %(query)s
   AND (%(from)s::timestamptz IS NULL OR a.published_at >= %(from)s)

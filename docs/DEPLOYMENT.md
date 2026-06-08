@@ -44,7 +44,7 @@ Settings are read from the environment (`django-environ`); compose also loads `.
 | Variable | Default | Notes |
 |---|---|---|
 | `DJANGO_SETTINGS_MODULE` | `newsforge.settings.dev` | `newsforge.settings.prod` in production |
-| `SECRET_KEY` | dev-only placeholder | **required** in prod; a long random string |
+| `SECRET_KEY` | dev-only placeholder | **required** in prod; random, at least 50 characters (prod refuses to start otherwise) |
 | `ALLOWED_HOSTS` | `localhost,127.0.0.1` (`*` in dev) | **required** in prod; comma-separated |
 | `CSRF_TRUSTED_ORIGINS` | empty | comma-separated origins |
 | `DEBUG` | `False` (`True` in dev) | |
@@ -63,10 +63,20 @@ Settings are read from the environment (`django-environ`); compose also loads `.
 | `THROTTLE_USER` | `600/min` |
 | `THROTTLE_AUTH` | `10/min` (register, token, refresh) |
 | `THROTTLE_SEARCH` | `60/min` |
+| `NUM_PROXIES` | `0` |
 
-Throttle counters live in the Redis cache and are keyed by client IP for anonymous requests.
-Behind a reverse proxy, make sure `REMOTE_ADDR` is the client address (or configure DRF's
-`NUM_PROXIES`), otherwise all clients share one bucket.
+Throttle counters live in the Redis cache, keyed by user for authenticated requests and by
+client address otherwise (registration and token requests are always anonymous). With
+`NUM_PROXIES=0` the address is `REMOTE_ADDR` and `X-Forwarded-For` is ignored, since clients
+can set it to anything. Behind reverse proxies set `NUM_PROXIES` to their number: the address
+is then taken from `X-Forwarded-For`, as appended by the outermost trusted proxy. Without it,
+all clients behind the proxy share one bucket.
+
+### Subscriptions
+
+| Variable | Default | Notes |
+|---|---|---|
+| `MAX_SUBSCRIPTIONS_PER_USER` | `20` | creating one more answers `400` |
 
 ### Crawler
 
@@ -116,7 +126,7 @@ security warnings with these settings.
 2. Set `DJANGO_SETTINGS_MODULE=newsforge.settings.prod`, a random `SECRET_KEY`,
    `ALLOWED_HOSTS`, and real `DATABASE_URL`, `REDIS_URL`, broker and SMTP settings.
 3. Terminate TLS at a reverse proxy; set `TRUST_X_FORWARDED_PROTO=true` only if it sets the
-   header on every request.
+   header on every request, and `NUM_PROXIES` to the number of proxies in front of the API.
 4. Use PostgreSQL 16 with the `unaccent` and `pg_trgm` extensions available (the migration
    creates them, which needs a role allowed to `CREATE EXTENSION`), and a private,
    password-protected Redis.

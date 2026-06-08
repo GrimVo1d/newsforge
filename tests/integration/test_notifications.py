@@ -145,6 +145,26 @@ def test_fanout_respects_tag_filter(user, hook, make_article, monkeypatch):
     assert queued == [(hook.id, tagged.id)]
 
 
+def test_articles_of_deleted_feeds_are_not_delivered(user, hook, make_article, feed, monkeypatch):
+    article = make_article("Django release notes", language="english")
+    sub = Subscription.objects.create(
+        owner=user,
+        name="daily",
+        q="django",
+        delivery="email",
+        email_to="me@example.internal",
+        interval=Subscription.Interval.DAILY,
+    )
+    feed.is_deleted = True
+    feed.save()
+    queued: list[tuple[int, int]] = []
+    monkeypatch.setattr(deliver, "apply_async", lambda args: queued.append(args))
+    assert fanout_instant(article.id) == {"fanout": 0}
+    assert daily_digest() == {"deliveries": 0}
+    assert queued == []
+    assert sub.delivery_log.count() == 0
+
+
 def test_digest_matches_in_article_language(user, make_article, monkeypatch):
     ru = make_article("Вышло обновление DRF", language="russian")
     sub = Subscription.objects.create(

@@ -166,6 +166,7 @@ _MATCH_INSTANT_SQL = """
 SELECT s.id
 FROM subscriptions_subscription s
 JOIN articles_article a ON a.id = %(aid)s
+JOIN feeds_feed f ON f.id = a.feed_id AND NOT f.is_deleted
 WHERE s.is_active
   AND s.interval = 'instant'
   AND a.tsv @@ websearch_to_tsquery(a.language::regconfig, unaccent(s.q))

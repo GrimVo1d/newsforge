@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from apps.feeds.fetcher import fetch
+from tests.httpmock import mock_transport
 
 
 @pytest.fixture(autouse=True)
@@ -23,7 +24,7 @@ URL = "https://feeds.example.internal/rss"
 
 def _fetch(handler, **kwargs):
     return fetch(
-        URL, etag=kwargs.get("etag"), last_modified=None, transport=httpx.MockTransport(handler)
+        URL, etag=kwargs.get("etag"), last_modified=None, transport=mock_transport(handler)
     )
 
 

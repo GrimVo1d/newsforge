@@ -55,3 +55,24 @@ def test_prod_settings_require_secret_key_and_hosts():
 
     ok = _import_prod_settings(SECRET_KEY="x" * 64, ALLOWED_HOSTS="news.example.internal")
     assert ok.returncode == 0, ok.stderr
+
+
+@pytest.mark.parametrize("key", ["change-me", "dev-only-insecure-secret-key-do-not-use-in-prod"])
+def test_prod_settings_reject_placeholder_secret_keys(key):
+    weak = _import_prod_settings(SECRET_KEY=key, ALLOWED_HOSTS="news.example.internal")
+    assert weak.returncode != 0
+    assert "SECRET_KEY must be" in weak.stderr
+
+
+def test_throttle_ignores_client_supplied_forwarded_for(rf):
+    from rest_framework.request import Request
+    from rest_framework.throttling import AnonRateThrottle
+
+    throttle = AnonRateThrottle()
+    idents = {
+        throttle.get_ident(
+            Request(rf.get("/", HTTP_X_FORWARDED_FOR=xff, REMOTE_ADDR="203.0.113.9"))
+        )
+        for xff in ("1.1.1.1", "2.2.2.2, 3.3.3.3")
+    }
+    assert idents == {"203.0.113.9"}

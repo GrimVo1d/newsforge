@@ -20,7 +20,8 @@ Invalid parameters give `400` with `{"code": "validation_error", "detail": {...}
 Response: `{"count": <hits on this page>, "results": [...]}`; each hit has `id`, `title`,
 `summary`, `url`, `feed_id`, `published_at`, `language`, `rank` and `highlight`. `count` is the
 size of the returned page, not the total number of matches: to page through results, request
-the next `offset` until a page comes back shorter than `limit`.
+the next `offset` until a page comes back shorter than `limit`. Articles of deleted feeds are
+never returned.
 
 Query syntax (`websearch_to_tsquery`): words are AND-ed, `"quoted phrase"`, `or`, and `-word`
 to exclude. `unaccent` is applied to both the query and the index, so `café` matches `cafe`.
@@ -65,9 +66,9 @@ MaxFragments=2, MinWords=5, MaxWords=20, StartSel=<b>, StopSel=</b>
 
 `MaxFragments=2` keeps the response payload bounded. Highlighting is the most expensive
 operator in the query, so `search_rank.sql` computes it in an outer query over the already
-limited page, on the first 2000 characters of the summary. The snippet contains `<b>` marks
-inside sanitized summary HTML; render it as HTML only after your own sanitization, or strip
-the tags.
+limited page. Its input is the summary with all tags removed (cut to 2000 characters), so the
+snippet is plain text, HTML-escaped (`&amp;`, `&lt;`), whose only markup is the `<b>` marks.
+It is safe to render as HTML.
 
 ## Fuzzy fallback (`pg_trgm`)
 

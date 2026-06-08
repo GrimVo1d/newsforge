@@ -128,6 +128,8 @@ keywords as case-insensitive substrings of title + summary + body; `any` needs o
 
 ### Subscriptions (`tasks.notifications`, `tasks.digest`)
 
+Articles of deleted feeds are never matched.
+
 - **instant** — `fanout_instant` runs after `apply_tag_rules` (a Celery chain) and selects
   subscriptions whose query matches the article (parsed in the article's language) and whose
   `feeds` / `tag_ids` filters, if set, include it.

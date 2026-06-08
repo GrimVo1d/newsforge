@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from django.conf import settings
 from rest_framework import serializers
 
 from apps.feeds.validators import SSRFError, assert_public_url
@@ -68,7 +69,13 @@ class SubscriptionSerializer(serializers.ModelSerializer[Subscription]):
         return attrs
 
     def create(self, validated: dict[str, Any]) -> Subscription:
-        validated["owner"] = self.context["request"].user
+        owner = self.context["request"].user
+        limit = settings.MAX_SUBSCRIPTIONS_PER_USER
+        if Subscription.objects.filter(owner=owner).count() >= limit:
+            raise serializers.ValidationError(
+                {"detail": f"at most {limit} subscriptions per user; delete one first"}
+            )
+        validated["owner"] = owner
         instance = super().create(validated)
         self._ensure_secret(instance)
         return instance

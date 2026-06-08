@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import gzip
 import socket
+import zlib
 from unittest.mock import patch
 
 import httpx
@@ -9,6 +11,7 @@ import pytest
 from apps.core import safe_http
 from apps.core.safe_http import UnsafeURLError
 from apps.feeds.validators import SSRFError, assert_public_url
+from tests.httpmock import mock_transport
 
 PUBLIC = "93.184.216.34"
 GETADDRINFO = "apps.core.safe_http.socket.getaddrinfo"
@@ -45,6 +48,14 @@ def _resolves_to(*ips: str):
         "fe80::1",
         "fc00::1",
         "::ffff:127.0.0.1",
+        # IPv6 forms that embed a private IPv4 address
+        "64:ff9b::a00:5",
+        "64:ff9b::a9fe:a9fe",
+        "64:ff9b:1::5db8:d822",
+        "::7f00:1",
+        "::ffff:0:7f00:1",
+        "2002:a00:1::1",
+        "fec0::1",
     ],
 )
 def test_rejects_non_public_addresses(ip):
@@ -79,6 +90,20 @@ def test_plain_http_is_opt_in():
         assert_public_url("http://feeds.example.internal/feed", allow_http=True)
 
 
+def test_nat64_of_a_public_address_is_allowed():
+    with _resolves_to("64:ff9b::5db8:d822"):  # 93.184.216.34
+        assert_public_url("https://feeds.example.internal/rss")
+
+
+def test_error_does_not_reveal_the_resolved_address():
+    with _resolves_to("10.0.0.5"), pytest.raises(SSRFError) as exc:
+        assert_public_url("https://db/")
+    assert "10.0.0.5" not in str(exc.value)
+    with patch(GETADDRINFO, side_effect=socket.gaierror("nope")), pytest.raises(SSRFError) as dns:
+        assert_public_url("https://missing.example.internal/feed")
+    assert str(dns.value) == str(exc.value)
+
+
 def test_dns_failure_is_rejected():
     with patch(GETADDRINFO, side_effect=socket.gaierror("nope")), pytest.raises(SSRFError):
         assert_public_url("https://missing.example.internal/feed")
@@ -101,7 +126,7 @@ def _transport(handler):
         seen.append(request)
         return handler(request)
 
-    return httpx.MockTransport(wrapped), seen
+    return mock_transport(wrapped), seen
 
 
 def test_request_is_pinned_to_checked_address():
@@ -176,3 +201,61 @@ def test_proxy_environment_is_ignored(monkeypatch):
     with _resolves_to(PUBLIC):
         safe_http.request("GET", "https://feeds.example.internal/", transport=transport)
     assert seen[0].url.host == PUBLIC
+
+
+def _encoded(body: bytes, encoding: str) -> httpx.Response:
+    if encoding == "gzip":
+        data = gzip.compress(body)
+    elif encoding == "deflate":
+        data = zlib.compress(body)
+    else:  # raw deflate stream, sent by some servers as "deflate"
+        c = zlib.compressobj(wbits=-zlib.MAX_WBITS)
+        data, encoding = c.compress(body) + c.flush(), "deflate"
+    return httpx.Response(
+        200, headers={"content-encoding": encoding}, stream=httpx.ByteStream(data)
+    )
+
+
+@pytest.mark.parametrize("encoding", ["gzip", "deflate", "raw-deflate"])
+def test_compressed_bodies_are_decoded(encoding):
+    transport, seen = _transport(lambda r: _encoded(b"<rss/>" * 100, encoding))
+    with _resolves_to(PUBLIC):
+        resp = safe_http.request("GET", "https://feeds.example.internal/", transport=transport)
+    assert resp.content == b"<rss/>" * 100
+    assert seen[0].headers["accept-encoding"] == "gzip, deflate"
+
+
+def test_decompression_stops_at_the_cap():
+    bomb = gzip.compress(b"\0" * 20_000_000)  # ~20 KB on the wire
+    transport, _ = _transport(
+        lambda r: httpx.Response(
+            200, headers={"content-encoding": "gzip"}, stream=httpx.ByteStream(bomb)
+        )
+    )
+    with _resolves_to(PUBLIC):
+        with pytest.raises(safe_http.ResponseTooLargeError):
+            safe_http.request(
+                "GET", "https://feeds.example.internal/", transport=transport, max_bytes=1024
+            )
+        resp = safe_http.request(
+            "GET",
+            "https://feeds.example.internal/",
+            transport=transport,
+            max_bytes=1024,
+            truncate=True,
+        )
+    assert resp.truncated
+    assert len(resp.content) == 1024
+
+
+@pytest.mark.parametrize(
+    ("encoding", "content"), [("gzip", b"not gzip at all"), ("br", b"\x0b\x02\x80")]
+)
+def test_undecodable_bodies_are_transport_errors(encoding, content):
+    transport, _ = _transport(
+        lambda r: httpx.Response(
+            200, headers={"content-encoding": encoding}, stream=httpx.ByteStream(content)
+        )
+    )
+    with _resolves_to(PUBLIC), pytest.raises(httpx.DecodingError):
+        safe_http.request("GET", "https://feeds.example.internal/", transport=transport)

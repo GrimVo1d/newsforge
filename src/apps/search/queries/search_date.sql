@@ -4,7 +4,9 @@ WITH q AS (
 SELECT
   a.id, a.title, a.summary, a.url, a.feed_id, a.published_at, a.language,
   0::float AS rank, '' AS highlight
-FROM articles_article a, q
+FROM articles_article a
+  JOIN feeds_feed f ON f.id = a.feed_id AND NOT f.is_deleted
+  CROSS JOIN q
 WHERE NOT a.is_deleted
   AND a.tsv @@ q.tsq
   AND (%(from)s::timestamptz IS NULL OR a.published_at >= %(from)s)

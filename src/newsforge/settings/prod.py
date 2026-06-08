@@ -1,10 +1,14 @@
+from django.core.exceptions import ImproperlyConfigured
+
 from .base import *  # noqa: F403
-from .base import env
+from .base import DEV_SECRET_KEY, env
 
 DEBUG = False
 
 # No defaults: a missing value must fail at startup instead of falling back to something public.
 SECRET_KEY = env("SECRET_KEY")
+if len(SECRET_KEY) < 50 or SECRET_KEY == DEV_SECRET_KEY:
+    raise ImproperlyConfigured("SECRET_KEY must be a random string of at least 50 characters")
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS")
 
 SECURE_SSL_REDIRECT = env.bool("SECURE_SSL_REDIRECT", default=True)
