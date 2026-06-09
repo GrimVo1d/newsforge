@@ -9,6 +9,7 @@ from typing import Any
 from django.db import connection
 
 SUPPORTED_LANGS = ("russian", "english", "simple")
+LANG_ALIASES = {"ru": "russian", "en": "english"}
 # Longer queries are phrases, not typos; trigram similarity on them is noise.
 TRGM_MAX_QUERY_CHARS = 24
 _HERE = Path(__file__).parent
@@ -30,8 +31,7 @@ def coerce_lang(lang: str | None) -> str:
     lang = lang.lower()
     if lang in SUPPORTED_LANGS:
         return lang
-    aliases = {"ru": "russian", "en": "english"}
-    return aliases.get(lang, "simple")
+    return LANG_ALIASES.get(lang, "simple")
 
 
 def run_search(
@@ -59,6 +59,8 @@ def run_search(
     rows = _fetch(sql, params)
     if rows or len(query) > TRGM_MAX_QUERY_CHARS:
         return rows
+    if offset and _fetch(sql, {**params, "limit": 1, "offset": 0}):
+        return rows  # paged past the last full-text hit; not a reason to go fuzzy
     # Nothing matched as words: try fuzzy title similarity (typos, partial words).
     return _fetch(TRGM_FALLBACK_SQL, params)
 

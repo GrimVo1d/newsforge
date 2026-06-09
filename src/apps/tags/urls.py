@@ -1,9 +1,9 @@
 from django.urls import path
-from rest_framework.routers import DefaultRouter
+from rest_framework.routers import SimpleRouter
 
 from apps.tags.views import ArticleTagView, TagRuleViewSet, TagViewSet
 
-router = DefaultRouter()
+router = SimpleRouter()
 router.register("tags", TagViewSet, basename="tag")
 router.register("tag-rules", TagRuleViewSet, basename="tag-rule")
 

@@ -20,5 +20,5 @@ Each article stores a `language` column (`russian` / `english` / `simple`). The 
 ## Consequences
 
 - Articles cannot mix two languages in a single tsvector cell — acceptable since articles are mono-lingual.
-- Adding a new language is a 3-step procedure (`docs/SEARCH.md` has the recipe).
+- Adding a new language is a 4-step procedure (`docs/SEARCH.md` has the recipe).
 - Search clients should pass `lang` when known; we auto-detect via `langdetect` at ingest, with `DetectorFactory.seed=0` for determinism.

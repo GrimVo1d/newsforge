@@ -66,7 +66,7 @@ All paths are under `/api/v1/`. Reads are public unless noted; writes need
 | `subscriptions/{id}/rotate-secret/` | POST | owner |
 | `subscriptions/{id}/deliveries/` | GET | owner |
 
-Outside `/api/v1/`: `/api/schema/` (OpenAPI), `/health/live`, `/health/ready` and
+`GET /api/v1/` links to each of these resources. Outside `/api/v1/`: `/api/schema/` (OpenAPI), `/health/live`, `/health/ready` and
 `/metrics` (Prometheus, only with `Authorization: Bearer $METRICS_TOKEN`).
 
 ## Development

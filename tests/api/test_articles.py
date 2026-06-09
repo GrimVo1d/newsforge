@@ -49,6 +49,8 @@ def test_filters(api, articles, feed):
 
     assert ids(tag="django") == [old.id]
     assert ids(language="russian") == [new.id]
+    assert ids(language="RU") == [new.id]
+    assert ids(language="en") == [old.id]
     assert ids(feed=feed.id) == [new.id, old.id]
     assert ids(feed=999_999) == []
     since = (timezone.now() - timedelta(days=1)).isoformat()

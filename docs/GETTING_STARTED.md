@@ -85,6 +85,7 @@ exponentially; after 6 consecutive errors the feed is paused for 24 hours.
 ```bash
 curl -s "$API/articles/?feed=1"                          # newest first
 curl -s "$API/articles/?tag=django&published_after=2026-05-01T00:00:00Z"
+curl -s "$API/articles/?language=ru"                     # russian / ru, english / en, simple
 curl -s "$API/articles/42/"                              # includes the sanitized body
 curl -s "$API/search/?q=django+release&lang=en"
 curl -s "$API/search/?q=%22async+views%22+-celery&sort=date&feed=1,2"
@@ -198,8 +199,10 @@ in that environment.
 
 ## Configuration
 
-All settings come from environment variables; `.env.example` lists them with defaults and
-compose reads `.env` automatically. [DEPLOYMENT.md](DEPLOYMENT.md) has the full reference and
+All settings come from environment variables. `.env.example` lists the ones worth changing
+locally, with their defaults; compose reads `.env` automatically. The database, Redis and
+broker URLs are fixed in `docker-compose.yml` to the stack's own services, so `.env` cannot
+point them elsewhere. [DEPLOYMENT.md](DEPLOYMENT.md) has the full reference and
 the production settings.
 
 ## Troubleshooting

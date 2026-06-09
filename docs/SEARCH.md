@@ -32,7 +32,8 @@ does not stem, so `обновления` will not match `обновление`.
 
 ## Ranking weights
 
-A/B/C are assigned at index time via `setweight` and reused at query time via the optional `weights` argument to `ts_rank_cd`. We use defaults (`{0.1, 0.2, 0.4, 1.0}` for `{D, C, B, A}`).
+A/B/C are assigned at index time via `setweight`. `ts_rank_cd` is called without a `weights`
+argument, so it applies the default weights `{0.1, 0.2, 0.4, 1.0}` for `{D, C, B, A}`.
 
 | Weight | Field | Rationale |
 |---|---|---|
@@ -76,7 +77,8 @@ When the full-text query finds nothing and `q` is at most 24 characters, the end
 answers from `queries/trgm_fallback.sql` instead: trigram similarity of `q` against titles
 (`title % q`, served by the `articles_title_trgm_idx` GIN index), with the same `feed`,
 `from`, `to`, `limit` and `offset` filters. `rank` is then the similarity (0–1) and
-`highlight` is empty.
+`highlight` is empty. Paging past the last full-text hit (`offset` beyond the matches) returns
+an empty page, not fuzzy results.
 
 This catches misspellings ("djnago" → "django"). The cut-off is the
 `pg_trgm.similarity_threshold` setting (0.3 by default).
@@ -85,7 +87,8 @@ This catches misspellings ("djnago" → "django"). The cut-off is the
 
 1. `CREATE TEXT SEARCH CONFIGURATION <name> ( COPY = pg_catalog.simple );` then `ALTER` to wire the appropriate dict.
 2. Drop stopword / synonym files into PG `$SHAREDIR/tsearch_data/`.
-3. Add the regconfig name to `apps.search.queries.SUPPORTED_LANGS`, to `LANG_CHOICES` in
+3. Add the regconfig name to `apps.search.queries.SUPPORTED_LANGS` (and a short alias to
+   `LANG_ALIASES`, if any), to `LANG_CHOICES` in
    `apps.search.serializers`, to `apps.feeds.models.Language`, and map its langdetect code in
    `apps.articles.normalizer._SUPPORTED_LANGS`.
 4. (Optional) backfill: `UPDATE articles_article SET language='<name>' WHERE feed_id IN (...);` — the BEFORE-UPDATE trigger reindexes affected rows.

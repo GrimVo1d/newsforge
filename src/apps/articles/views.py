@@ -6,11 +6,13 @@ from rest_framework import permissions, serializers, viewsets
 
 from apps.articles.models import Article
 from apps.articles.serializers import ArticleDetailSerializer, ArticleSerializer
+from apps.search.queries import LANG_ALIASES
 from apps.tags.models import ArticleTag
 
 
 class ArticleFilter(django_filters.FilterSet):
     feed = django_filters.NumberFilter(field_name="feed_id")
+    language = django_filters.CharFilter(method="filter_language")
     tag = django_filters.CharFilter(field_name="article_tags__tag__slug")
     published_after = django_filters.IsoDateTimeFilter(field_name="published_at", lookup_expr="gte")
     published_before = django_filters.IsoDateTimeFilter(field_name="published_at", lookup_expr="lt")
@@ -18,6 +20,12 @@ class ArticleFilter(django_filters.FilterSet):
     class Meta:
         model = Article
         fields = ("feed", "language", "tag", "published_after", "published_before")
+
+    def filter_language(
+        self, queryset: QuerySet[Article], name: str, value: str
+    ) -> QuerySet[Article]:
+        value = value.lower()
+        return queryset.filter(language=LANG_ALIASES.get(value, value))
 
 
 class ArticleViewSet(viewsets.ReadOnlyModelViewSet[Article]):

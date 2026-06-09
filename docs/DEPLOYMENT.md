@@ -93,7 +93,7 @@ all clients behind the proxy share one bucket.
 
 | Variable | Default |
 |---|---|
-| `EMAIL_HOST` / `EMAIL_PORT` | `localhost` / `25` (compose: `mailpit` / `1025`) |
+| `EMAIL_HOST` / `EMAIL_PORT` | `localhost` / `25` (compose: `mailpit` / `1025`, overridable from `.env`) |
 | `EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD` | empty |
 | `EMAIL_USE_TLS` | `false` |
 | `DEFAULT_FROM_EMAIL` | `no-reply@newsforge.local` |

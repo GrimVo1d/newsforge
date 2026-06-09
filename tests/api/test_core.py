@@ -76,3 +76,8 @@ def test_throttle_ignores_client_supplied_forwarded_for(rf):
         for xff in ("1.1.1.1", "2.2.2.2, 3.3.3.3")
     }
     assert idents == {"203.0.113.9"}
+
+
+def test_api_root_lists_every_resource(api):
+    body = api.get("/api/v1/").json()
+    assert set(body) == {"feeds", "articles", "tags", "tag-rules", "subscriptions", "search"}

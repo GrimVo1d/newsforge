@@ -80,6 +80,14 @@ def test_fuzzy_fallback_keeps_filters(api, articles, feed):
     assert api.get(URL, {"q": "Djangoo releese", "feed": 999_999}).json()["count"] == 0
 
 
+def test_paging_past_the_last_hit_does_not_go_fuzzy(api, articles):
+    # One full-text hit; its title is also a trigram match for "django release".
+    assert api.get(URL, {"q": "django release"}).json()["count"] == 1
+    assert api.get(URL, {"q": "django release", "offset": 1}).json()["count"] == 0
+    # Fuzzy results still page normally.
+    assert api.get(URL, {"q": "Djangoo releese", "offset": 1}).json()["count"] == 0
+
+
 def test_highlight_is_plain_text_with_marks(api, make_article):
     make_article(
         "Pixel",

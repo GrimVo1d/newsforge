@@ -1,8 +1,8 @@
-from rest_framework.routers import DefaultRouter
+from rest_framework.routers import SimpleRouter
 
 from apps.feeds.views import FeedViewSet
 
-router = DefaultRouter()
+router = SimpleRouter()
 router.register("feeds", FeedViewSet, basename="feed")
 
 urlpatterns = router.urls
