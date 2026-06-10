@@ -32,15 +32,25 @@ def test_list_limit_is_capped(api, feed):
     assert "limit=100" in (resp.json()["next"] or "limit=100")
 
 
-def _import_prod_settings(**env: str) -> subprocess.CompletedProcess[str]:
-    clean = {k: v for k, v in os.environ.items() if k not in {"SECRET_KEY", "ALLOWED_HOSTS"}}
-    clean.update(env, DJANGO_SETTINGS_MODULE="newsforge.settings.prod")
+GOOD_KEY = "kq3F8vYp2LmZ7tW1xR9sB4nJ6hD0cA5eU-gT_iO3wE8rQ2yN7uM1"
+
+
+def _run_python(code: str, **env: str) -> subprocess.CompletedProcess[str]:
+    unset = {"SECRET_KEY", "ALLOWED_HOSTS", "DJANGO_SETTINGS_MODULE"}
+    clean = {k: v for k, v in os.environ.items() if k not in unset}
+    clean.update(env)
     return subprocess.run(
-        [sys.executable, "-c", "import django; django.setup()"],
+        [sys.executable, "-c", code],
         env=clean,
         capture_output=True,
         text=True,
         check=False,
+    )
+
+
+def _import_prod_settings(**env: str) -> subprocess.CompletedProcess[str]:
+    return _run_python(
+        "import django; django.setup()", DJANGO_SETTINGS_MODULE="newsforge.settings.prod", **env
     )
 
 
@@ -49,19 +59,53 @@ def test_prod_settings_require_secret_key_and_hosts():
     assert missing.returncode != 0
     assert "SECRET_KEY" in missing.stderr
 
-    no_hosts = _import_prod_settings(SECRET_KEY="x" * 64)
+    no_hosts = _import_prod_settings(SECRET_KEY=GOOD_KEY)
     assert no_hosts.returncode != 0
     assert "ALLOWED_HOSTS" in no_hosts.stderr
 
-    ok = _import_prod_settings(SECRET_KEY="x" * 64, ALLOWED_HOSTS="news.example.internal")
+    ok = _import_prod_settings(SECRET_KEY=GOOD_KEY, ALLOWED_HOSTS="news.example.internal")
     assert ok.returncode == 0, ok.stderr
 
 
-@pytest.mark.parametrize("key", ["change-me", "dev-only-insecure-secret-key-do-not-use-in-prod"])
+@pytest.mark.parametrize(
+    "key",
+    [
+        "change-me",
+        "dev-only-insecure-secret-key-do-not-use-in-prod",
+        "x" * 64,
+        "django-insecure-" + GOOD_KEY,
+    ],
+)
 def test_prod_settings_reject_placeholder_secret_keys(key):
     weak = _import_prod_settings(SECRET_KEY=key, ALLOWED_HOSTS="news.example.internal")
     assert weak.returncode != 0
     assert "SECRET_KEY must be" in weak.stderr
+
+
+@pytest.mark.parametrize("module", ["newsforge.wsgi", "newsforge.asgi", "newsforge.celery"])
+def test_server_entry_points_default_to_prod_settings(module):
+    # Importing the package first loads newsforge.celery; it must not pick dev settings.
+    code = f"import {module}; from django.conf import settings; print(settings.DEBUG)"
+    missing = _run_python(code)
+    assert missing.returncode != 0
+    assert "SECRET_KEY" in missing.stderr
+    ok = _run_python(code, SECRET_KEY=GOOD_KEY, ALLOWED_HOSTS="news.example.internal")
+    assert ok.returncode == 0, ok.stderr
+    assert ok.stdout.strip() == "False"
+
+
+def test_health_probes_skip_host_check_and_https_redirect(api, settings):
+    settings.ALLOWED_HOSTS = ["news.example.internal"]
+    settings.SECURE_SSL_REDIRECT = True
+    assert api.get("/health/live", HTTP_HOST="127.0.0.1:8000").json() == {"status": "ok"}
+    assert api.get("/health/ready", HTTP_HOST="127.0.0.1:8000").status_code == 200
+    assert api.get("/api/v1/feeds/", HTTP_HOST="127.0.0.1:8000").status_code == 400
+    assert api.get("/api/v1/feeds/", HTTP_HOST="news.example.internal").status_code == 301
+
+
+def test_metrics_token_needs_bearer_scheme(api):
+    assert api.get("/metrics", HTTP_AUTHORIZATION="test-metrics-token").status_code == 404
+    assert api.get("/metrics", HTTP_AUTHORIZATION="Token test-metrics-token").status_code == 404
 
 
 def test_throttle_ignores_client_supplied_forwarded_for(rf):

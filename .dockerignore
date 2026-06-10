@@ -1,18 +1,9 @@
-.git
-.gitignore
-.dockerignore
-.env
-.env.*
-!.env.example
+# Allow-list: the build only needs these paths (see docker/Dockerfile).
+*
+!pyproject.toml
+!README.md
+!manage.py
+!src/
+!docker/entrypoint.sh
 **/__pycache__
 **/*.py[cod]
-.venv
-.mypy_cache
-.ruff_cache
-.pytest_cache
-.hypothesis
-.coverage
-htmlcov
-docs
-tests
-docker-compose*.yml

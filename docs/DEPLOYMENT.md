@@ -7,7 +7,7 @@
 | Stage | Contents |
 |---|---|
 | `builder` | virtualenv in `/opt/venv` with the runtime dependencies |
-| `runtime` | the virtualenv, `manage.py` and `src/`; runs as the unprivileged user `app` (uid 10001) |
+| `runtime` | the virtualenv (without pip), `manage.py` and `src/`; runs as the unprivileged user `app` (uid 10001); `DJANGO_SETTINGS_MODULE=newsforge.settings.prod` |
 | `dev` | builder + dev dependencies and git, source mounted at `/app`; used by `make test` / `lint` / `typecheck` |
 
 `docker/entrypoint.sh` selects the process by its first argument:
@@ -15,7 +15,7 @@
 | Command | Runs |
 |---|---|
 | `api` (default) | `gunicorn newsforge.wsgi:application` on `0.0.0.0:8000`, `GUNICORN_WORKERS` workers (4) |
-| `worker` | `celery -A newsforge worker`, queues `CELERY_QUEUES` (`default,low`), `CELERY_CONCURRENCY` (4) |
+| `worker` | `celery -A newsforge worker`, queues `CELERY_QUEUES` (`default,low`), `CELERY_CONCURRENCY` (4); a pool process is replaced after it grows past `CELERY_MAX_MEMORY_PER_CHILD` KiB |
 | `beat` | `celery -A newsforge beat` with its schedule file in `/tmp` |
 | `migrate` | `python manage.py migrate --noinput` |
 | anything else | executed as is, e.g. `python manage.py createsuperuser` |
@@ -43,10 +43,9 @@ Settings are read from the environment (`django-environ`); compose also loads `.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `DJANGO_SETTINGS_MODULE` | `newsforge.settings.dev` | `newsforge.settings.prod` in production |
-| `SECRET_KEY` | dev-only placeholder | **required** in prod; random, at least 50 characters (prod refuses to start otherwise) |
-| `ALLOWED_HOSTS` | `localhost,127.0.0.1` (`*` in dev) | **required** in prod; comma-separated |
-| `CSRF_TRUSTED_ORIGINS` | empty | comma-separated origins |
+| `DJANGO_SETTINGS_MODULE` | `newsforge.settings.prod` (image, gunicorn, celery); `newsforge.settings.dev` for `manage.py` and compose | |
+| `SECRET_KEY` | none (a dev-only key in `newsforge.settings.dev`) | **required** in prod: random, at least 50 characters, at least 5 distinct ones, not `django-insecure-…`; prod refuses to start otherwise |
+| `ALLOWED_HOSTS` | `localhost,127.0.0.1` (`*` in dev) | **required** in prod; comma-separated. Health probes do not need to be listed |
 | `DEBUG` | `False` (`True` in dev) | |
 | `DATABASE_URL` | `postgres://nf:nf@db:5432/newsforge` | |
 | `REDIS_URL` | `redis://redis:6379/0` | cache, rate limits, robots.txt cache, readiness |
@@ -104,6 +103,7 @@ all clients behind the proxy share one bucket.
 |---|---|
 | `GUNICORN_WORKERS` | `4` |
 | `CELERY_CONCURRENCY` | `4` |
+| `CELERY_MAX_MEMORY_PER_CHILD` | `262144` (KiB, 256 MiB) |
 | `CELERY_QUEUES` | `default,low` |
 | `CELERY_LOG_LEVEL` | `INFO` |
 | `CELERY_TASK_SOFT_TIME_LIMIT` / `CELERY_TASK_TIME_LIMIT` | `60` / `90` seconds |
@@ -119,11 +119,16 @@ all clients behind the proxy share one bucket.
 Session and CSRF cookies are marked secure. `python manage.py check --deploy` reports no
 security warnings with these settings.
 
+`/health/live` and `/health/ready` are answered before the host check and the HTTPS redirect,
+so a probe can call `http://127.0.0.1:8000/health/live` inside the container without adding
+that address to `ALLOWED_HOSTS`.
+
 ## Production checklist
 
 1. Build the `runtime` target and run `migrate` once per release before starting the new
    `api`, `worker` and `beat` containers.
-2. Set `DJANGO_SETTINGS_MODULE=newsforge.settings.prod`, a random `SECRET_KEY`,
+2. Keep `DJANGO_SETTINGS_MODULE=newsforge.settings.prod` (the image default), set a random
+   `SECRET_KEY` (`python -c 'import secrets; print(secrets.token_urlsafe(64))'`),
    `ALLOWED_HOSTS`, and real `DATABASE_URL`, `REDIS_URL`, broker and SMTP settings.
 3. Terminate TLS at a reverse proxy; set `TRUST_X_FORWARDED_PROTO=true` only if it sets the
    header on every request, and `NUM_PROXIES` to the number of proxies in front of the API.
@@ -133,6 +138,8 @@ security warnings with these settings.
 5. Run exactly one `beat`; scale `worker` and `api` horizontally.
 6. Create the first staff account: `docker compose run --rm api python manage.py createsuperuser`.
 7. Scrape `/metrics` with `Authorization: Bearer $METRICS_TOKEN`, probe `/health/ready`.
+8. Put a reverse proxy in front of gunicorn: its sync workers are not meant to face slow
+   clients directly.
 
 ## Scaling notes
 

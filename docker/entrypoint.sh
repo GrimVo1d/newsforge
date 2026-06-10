@@ -16,7 +16,8 @@ case "$cmd" in
     exec celery -A newsforge worker \
       --loglevel="${CELERY_LOG_LEVEL:-INFO}" \
       --queues="${CELERY_QUEUES:-default,low}" \
-      --concurrency="${CELERY_CONCURRENCY:-4}"
+      --concurrency="${CELERY_CONCURRENCY:-4}" \
+      --max-memory-per-child="${CELERY_MAX_MEMORY_PER_CHILD:-262144}"
     ;;
   beat)
     exec celery -A newsforge beat \

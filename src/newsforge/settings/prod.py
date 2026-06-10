@@ -7,8 +7,17 @@ DEBUG = False
 
 # No defaults: a missing value must fail at startup instead of falling back to something public.
 SECRET_KEY = env("SECRET_KEY")
-if len(SECRET_KEY) < 50 or SECRET_KEY == DEV_SECRET_KEY:
-    raise ImproperlyConfigured("SECRET_KEY must be a random string of at least 50 characters")
+# The same bar as Django's security.W009, enforced instead of only reported by check --deploy.
+if (
+    len(SECRET_KEY) < 50
+    or len(set(SECRET_KEY)) < 5
+    or SECRET_KEY.startswith("django-insecure-")
+    or SECRET_KEY == DEV_SECRET_KEY
+):
+    raise ImproperlyConfigured(
+        "SECRET_KEY must be a random string of at least 50 characters "
+        "(e.g. python -c 'import secrets; print(secrets.token_urlsafe(64))')"
+    )
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS")
 
 SECURE_SSL_REDIRECT = env.bool("SECURE_SSL_REDIRECT", default=True)

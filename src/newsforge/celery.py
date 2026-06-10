@@ -5,7 +5,9 @@ import os
 from celery import Celery
 from celery.schedules import crontab
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "newsforge.settings.dev")
+# Production by default, like wsgi.py / asgi.py: this module is imported first (from the package
+# __init__), so a dev default here would win for gunicorn too. manage.py defaults to dev.
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "newsforge.settings.prod")
 
 TASK_MODULES = (
     "tasks.articles",

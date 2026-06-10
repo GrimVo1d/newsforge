@@ -31,7 +31,13 @@ WORKDIR /app
 
 
 FROM base AS runtime
+# Production unless told otherwise; compose sets newsforge.settings.dev for local work.
+ENV DJANGO_SETTINGS_MODULE=newsforge.settings.prod
 COPY --from=builder /opt/venv /opt/venv
+# pip is not needed at runtime; both copies (venv and system) bring vendored packages
+# that scanners flag.
+RUN /opt/venv/bin/python -m pip uninstall -y pip \
+    && /usr/local/bin/python -m pip uninstall -y pip
 WORKDIR /app
 COPY manage.py ./
 COPY src ./src

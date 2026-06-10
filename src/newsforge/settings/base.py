@@ -8,12 +8,12 @@ import environ
 
 env = environ.Env()
 
-# Only for local development; prod.py requires SECRET_KEY from the environment.
+# No usable default here: dev.py and test.py set their own key, prod.py requires a real one.
+# The dev key is named so prod.py can refuse it.
 DEV_SECRET_KEY = "dev-only-insecure-secret-key-do-not-use-in-prod"
-SECRET_KEY = env("SECRET_KEY", default=DEV_SECRET_KEY)
+SECRET_KEY = env("SECRET_KEY", default="")
 DEBUG = env.bool("DEBUG", default=False)
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
-CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
 
 INSTALLED_APPS = [
     "django.contrib.auth",
@@ -37,6 +37,8 @@ SIMPLE_JWT = {
 }
 
 MIDDLEWARE = [
+    # First: probes reach /health/* by IP over plain http, before host checks and redirects.
+    "apps.core.middleware.HealthCheckMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -161,7 +163,8 @@ CELERY_TASK_TIME_LIMIT = env.int("CELERY_TASK_TIME_LIMIT", default=90)
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
-    "handlers": {"console": {"class": "logging.StreamHandler"}},
+    "formatters": {"plain": {"format": "%(asctime)s %(levelname)s %(name)s: %(message)s"}},
+    "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "plain"}},
     "root": {"handlers": ["console"], "level": env("LOG_LEVEL", default="INFO")},
     # httpx logs every request at INFO, with the pinned IP instead of the host name
     "loggers": {"httpx": {"level": "WARNING"}},

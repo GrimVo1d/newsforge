@@ -56,9 +56,10 @@ STRIDE applied to the crawler, the API and subscription delivery.
 - Rejected feed and webhook URLs get one generic message; the resolved private address (or a
   failed lookup) is only logged, so the API cannot be used to map internal DNS.
 - Articles of deleted feeds disappear from search, listings and subscription matching.
-- Production settings: no default `SECRET_KEY` or `ALLOWED_HOSTS` (and a short or placeholder
-  key refuses to start), `DEBUG=False`, HTTPS redirect, HSTS, secure cookies; compose binds
-  every port to localhost.
+- Production settings are the default of the image and of every server entry point (gunicorn,
+  celery); only `manage.py` and compose pick dev. They have no default `SECRET_KEY` or
+  `ALLOWED_HOSTS` (a weak or placeholder key refuses to start), `DEBUG=False`, HTTPS redirect,
+  HSTS, secure cookies; compose binds every port to localhost.
 
 ### Denial of service
 

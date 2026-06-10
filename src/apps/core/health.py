@@ -9,6 +9,7 @@ from drf_spectacular.utils import extend_schema, inline_serializer
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from rest_framework import serializers
 from rest_framework.permissions import AllowAny
+from rest_framework.renderers import JSONRenderer
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -17,8 +18,10 @@ from apps.feeds.ratelimit import redis_client
 
 
 class LiveView(APIView):
+    authentication_classes = ()
     permission_classes = (AllowAny,)
     throttle_classes = ()
+    renderer_classes = (JSONRenderer,)
 
     @extend_schema(
         responses=inline_serializer("Live", {"status": serializers.CharField()}),
@@ -28,8 +31,10 @@ class LiveView(APIView):
 
 
 class ReadyView(APIView):
+    authentication_classes = ()
     permission_classes = (AllowAny,)
     throttle_classes = ()
+    renderer_classes = (JSONRenderer,)
 
     @extend_schema(
         responses=inline_serializer(
@@ -54,7 +59,11 @@ class ReadyView(APIView):
 def metrics_view(request: HttpRequest) -> HttpResponse:
     """Prometheus exposition, guarded by a bearer token; hidden entirely when none is set."""
     token = settings.METRICS_TOKEN
-    supplied = request.headers.get("Authorization", "").removeprefix("Bearer ")
-    if not token or not hmac.compare_digest(supplied.encode(), token.encode()):
+    scheme, _, supplied = request.headers.get("Authorization", "").partition(" ")
+    if (
+        not token
+        or scheme != "Bearer"
+        or not hmac.compare_digest(supplied.encode(), token.encode())
+    ):
         raise Http404
     return HttpResponse(generate_latest(), content_type=CONTENT_TYPE_LATEST)
