@@ -68,6 +68,7 @@ def test_webhook_is_signed_and_logged(hook, article, receiver):
     (call,) = receiver.calls
     headers, body = call["headers"], call["content"]
     assert call["max_redirects"] == 0
+    assert call["discard_body"] is True  # a 2xx with a broken body is still delivered
     assert json.loads(body)["id"] == article.id
     ts = int(headers["X-NF-Timestamp"])
     assert headers["X-NF-Signature"] == sign(hook.webhook_secret, ts, body)

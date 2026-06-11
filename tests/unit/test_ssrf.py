@@ -56,6 +56,9 @@ def _resolves_to(*ips: str):
         "::ffff:0:7f00:1",
         "2002:a00:1::1",
         "fec0::1",
+        "5f00::1",
+        "192.88.99.1",
+        "2002:c058:6301::1",  # 6to4 of the relay anycast address
     ],
 )
 def test_rejects_non_public_addresses(ip):
@@ -259,3 +262,89 @@ def test_undecodable_bodies_are_transport_errors(encoding, content):
     )
     with _resolves_to(PUBLIC), pytest.raises(httpx.DecodingError):
         safe_http.request("GET", "https://feeds.example.internal/", transport=transport)
+
+
+def test_data_after_the_compressed_stream_is_not_read():
+    trailer_chunks = 0
+
+    class Stream(httpx.SyncByteStream):
+        def __iter__(self):
+            nonlocal trailer_chunks
+            yield gzip.compress(b"<rss/>")
+            while True:  # an endless trailer after the end of the gzip member
+                trailer_chunks += 1
+                yield b"\0" * 4096
+
+    transport, _ = _transport(
+        lambda r: httpx.Response(200, headers={"content-encoding": "gzip"}, stream=Stream())
+    )
+    with _resolves_to(PUBLIC):
+        resp = safe_http.request("GET", "https://feeds.example.internal/", transport=transport)
+    assert resp.content == b"<rss/>"
+    assert trailer_chunks <= 1
+
+
+def test_raw_bytes_are_capped_even_when_they_decode_to_nothing():
+    class Stream(httpx.SyncByteStream):
+        def __iter__(self):
+            while True:  # empty stored deflate blocks: raw bytes, no output, no end of stream
+                yield b"\x00\x00\x00\xff\xff" * 1000
+
+    transport, _ = _transport(
+        lambda r: httpx.Response(200, headers={"content-encoding": "deflate"}, stream=Stream())
+    )
+    with _resolves_to(PUBLIC), pytest.raises(safe_http.ResponseTooLargeError):
+        safe_http.request(
+            "GET", "https://feeds.example.internal/", transport=transport, max_bytes=1024
+        )
+
+
+def test_discard_body_skips_reading():
+    transport, _ = _transport(
+        lambda r: httpx.Response(
+            200, headers={"content-encoding": "gzip"}, stream=httpx.ByteStream(b"not gzip")
+        )
+    )
+    with _resolves_to(PUBLIC):
+        resp = safe_http.request(
+            "POST", "https://hooks.example.internal/", transport=transport, discard_body=True
+        )
+    assert (resp.status_code, resp.content) == (200, b"")
+
+
+@pytest.mark.parametrize(
+    ("codes", "permanent"), [((301, 308), True), ((301, 302), False), ((), False)]
+)
+def test_permanent_url_only_after_permanent_redirects(codes, permanent):
+    def handler(request: httpx.Request) -> httpx.Response:
+        n = int(request.url.path.strip("/") or 0)
+        if n < len(codes):
+            return httpx.Response(codes[n], headers={"location": f"/{n + 1}"})
+        return httpx.Response(200)
+
+    transport, _ = _transport(handler)
+    with _resolves_to(PUBLIC):
+        resp = safe_http.request("GET", "https://feeds.example.internal/", transport=transport)
+    expected = f"https://feeds.example.internal/{len(codes)}" if permanent else None
+    assert resp.permanent_url == expected
+
+
+def test_every_hop_gets_its_own_connection():
+    clients: list[object] = []
+    real = httpx.Client
+
+    def tracking(*args, **kwargs):
+        client = real(*args, **kwargs)
+        clients.append(client)
+        return client
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.headers["host"] == "a.example.internal":
+            return httpx.Response(302, headers={"location": "https://b.example.internal/"})
+        return httpx.Response(200)
+
+    transport, seen = _transport(handler)
+    with _resolves_to(PUBLIC), patch("apps.core.safe_http.httpx.Client", side_effect=tracking):
+        safe_http.request("GET", "https://a.example.internal/", transport=transport)
+    assert len(seen) == 2
+    assert len(clients) == 2

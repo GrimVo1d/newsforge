@@ -66,8 +66,9 @@ STRIDE applied to the crawler, the API and subscription delivery.
 - **Against feed servers** — robots.txt, per-domain rate limit, conditional requests,
   backoff, pausing of failing feeds, a minimum polling interval of 5 minutes.
 - **Against the worker** — per-request deadline and body cap (5 MB for feeds, 200 KB for
-  robots.txt, 64 KB for webhook answers) applied to the decompressed size, so gzip bombs stop
-  at the cap; at most 200 entries per fetch, Celery soft / hard time limits.
+  robots.txt) applied to the decompressed and the raw size, so gzip bombs and endless
+  trailers stop at the cap; webhook answers are not read beyond the status line and headers;
+  at most 200 entries per fetch, Celery soft / hard time limits.
 - **Against the API** — global anonymous and per-user throttles, a separate search throttle,
   `limit` ≤ 100, `offset` ≤ 10000, `q` ≤ 256 characters, `ts_headline` only on the result page.
 - **Webhook backpressure** — bounded retries with backoff; already delivered pairs are

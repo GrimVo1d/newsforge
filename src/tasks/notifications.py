@@ -93,10 +93,9 @@ def _send_webhook(sub: Subscription, body: bytes, idempotency_key: str) -> int:
         headers=headers,
         content=body,
         timeout=10.0,
-        max_bytes=64 * 1024,
         max_redirects=0,
         allow_http=settings.ALLOW_PLAIN_HTTP,
-        truncate=True,
+        discard_body=True,  # only the status matters; a broken body must not fail a delivery
     )
     if resp.status_code >= 500 or resp.status_code in (408, 429):
         raise RetryableDeliveryError(resp.status_code)

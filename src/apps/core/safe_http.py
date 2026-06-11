@@ -28,6 +28,9 @@ IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 
 ALLOWED_PORTS = {"http": 80, "https": 443}
 REDIRECT_CODES = {301, 302, 303, 307, 308}
+PERMANENT_REDIRECT_CODES = {301, 308}
+# Raw bytes allowed beyond max_bytes (compressed data can be slightly larger than its output).
+RAW_SLACK_BYTES = 64 * 1024
 # The body is decoded here, so only advertise what _read_body can decode with a size limit.
 ACCEPT_ENCODING = "gzip, deflate"
 # Shown to API users instead of the resolved address, so errors do not map internal DNS.
@@ -44,10 +47,12 @@ _EMBEDS_IPV4 = (
     ipaddress.IPv6Network("::ffff:0:0:0/96"),  # IPv4-translated
     ipaddress.IPv6Network("64:ff9b::/96"),  # NAT64 well-known prefix
 )
-_NEVER_PUBLIC = (
+_NEVER_PUBLIC_V6 = (
     ipaddress.IPv6Network("64:ff9b:1::/48"),  # NAT64 local use
     ipaddress.IPv6Network("fec0::/10"),  # site-local (deprecated)
+    ipaddress.IPv6Network("5f00::/16"),  # SRv6 SIDs
 )
+_NEVER_PUBLIC_V4 = (ipaddress.IPv4Network("192.88.99.0/24"),)  # 6to4 relay anycast (deprecated)
 
 
 class UnsafeURLError(ValueError):
@@ -83,6 +88,8 @@ class Response:
     content: bytes
     url: str
     truncated: bool = False
+    # The final URL when every redirect on the way was permanent (301/308), else None.
+    permanent_url: str | None = None
 
     @property
     def text(self) -> str:
@@ -91,12 +98,14 @@ class Response:
 
 def _is_public(ip: IPAddress) -> bool:
     if isinstance(ip, ipaddress.IPv6Address):
-        if any(ip in net for net in _NEVER_PUBLIC):
+        if any(ip in net for net in _NEVER_PUBLIC_V6):
             return False
         if any(ip in net for net in _EMBEDS_IPV4):
             return _is_public(ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF))
         if ip.sixtofour is not None:
             return _is_public(ip.sixtofour)
+    elif any(ip in net for net in _NEVER_PUBLIC_V4):
+        return False
     return ip.is_global and not ip.is_multicast
 
 
@@ -155,24 +164,29 @@ def request(
     max_redirects: int = 5,
     allow_http: bool = False,
     truncate: bool = False,
+    discard_body: bool = False,
     transport: httpx.BaseTransport | None = None,
 ) -> Response:
     """Send a request to a public URL.
 
     Raises UnsafeURLError, ResponseTooLargeError (unless ``truncate``), DeadlineExceededError,
     or httpx.HTTPError for transport failures. Redirects beyond ``max_redirects`` are returned
-    as-is (a 3xx response).
+    as-is (a 3xx response). With ``discard_body`` the response body is not read at all, so
+    only the status line and headers can fail.
     """
     deadline = time.monotonic() + timeout
     method = method.upper()
+    permanent = True
 
-    with httpx.Client(transport=transport, trust_env=False, follow_redirects=False) as client:
-        for hop in range(max_redirects + 1):
-            target = resolve(url, allow_http=allow_http)
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise DeadlineExceededError(url)
-            host_header = target.host if ":" not in target.host else f"[{target.host}]"
+    for hop in range(max_redirects + 1):
+        target = resolve(url, allow_http=allow_http)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise DeadlineExceededError(url)
+        host_header = target.host if ":" not in target.host else f"[{target.host}]"
+        # A fresh client per hop: pooled connections are keyed by the pinned IP, so a later hop
+        # to another host on the same IP must not reuse a TLS session verified for the first.
+        with httpx.Client(transport=transport, trust_env=False, follow_redirects=False) as client:
             req = client.build_request(
                 method,
                 target.pinned_url,
@@ -189,14 +203,25 @@ def request(
             try:
                 location = resp.headers.get("location")
                 if resp.status_code in REDIRECT_CODES and location and hop < max_redirects:
+                    permanent = permanent and resp.status_code in PERMANENT_REDIRECT_CODES
                     url = urljoin(url, location)
                     if resp.status_code == 303 or (
                         resp.status_code in (301, 302) and method == "POST"
                     ):
                         method, content = "GET", None
                     continue
-                body, truncated = _read_body(resp, max_bytes, deadline, truncate)
-                return Response(resp.status_code, resp.headers, body, url, truncated)
+                if discard_body:
+                    body, truncated = b"", False
+                else:
+                    body, truncated = _read_body(resp, max_bytes, deadline, truncate)
+                return Response(
+                    resp.status_code,
+                    resp.headers,
+                    body,
+                    url,
+                    truncated,
+                    permanent_url=url if permanent and hop > 0 else None,
+                )
             finally:
                 resp.close()
     raise AssertionError("unreachable")  # pragma: no cover
@@ -223,12 +248,15 @@ def _read_body(
         raise ResponseTooLargeError(declared)
     buf = bytearray()
     limit = max_bytes + 1  # one byte over the cap is enough to know it is too large
+    raw_limit = max_bytes + RAW_SLACK_BYTES
+    raw_read = 0
     decoder: zlib._Decompress | None = None
     started = False
     try:
         for chunk in resp.iter_raw():
             if time.monotonic() > deadline:
                 raise DeadlineExceededError(str(resp.request.url))
+            raw_read += len(chunk)
             if not started:
                 decoder, started = _decompressor(resp, chunk), True
             if decoder is None:
@@ -236,17 +264,19 @@ def _read_body(
             else:
                 # Decompress at most up to the cap; the rest of a bomb is never expanded.
                 data = chunk
-                while data and len(buf) < limit:
+                while data and len(buf) < limit and not decoder.eof:
                     buf.extend(decoder.decompress(data, limit - len(buf)))
                     data = decoder.unconsumed_tail
-            if len(buf) > max_bytes:
+                if decoder.eof:
+                    break  # anything after the end of the compressed stream is ignored
+            if len(buf) > max_bytes or raw_read > raw_limit:
                 break
-        if decoder is not None and len(buf) <= max_bytes:
+        if decoder is not None and len(buf) <= max_bytes and not decoder.eof:
             buf.extend(decoder.flush())
     except zlib.error as exc:
         raise httpx.DecodingError(f"invalid compressed body: {exc}", request=resp.request) from exc
-    if len(buf) > max_bytes:
+    if len(buf) > max_bytes or raw_read > raw_limit:
         if truncate:
             return bytes(buf[:max_bytes]), True
-        raise ResponseTooLargeError(len(buf))
+        raise ResponseTooLargeError(max(len(buf), raw_read))
     return bytes(buf), False
