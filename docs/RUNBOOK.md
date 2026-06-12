@@ -22,12 +22,22 @@ GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 20;
 2. `ssrf_blocked` → the host now resolves to a private address, does not resolve, or
    redirects to such a host (or to plain `http`); this is intended, fix the feed URL. The
    worker log has the resolved address (`apps.core.safe_http`, level `INFO`).
-3. `robots_blocked` → the site's robots.txt disallows the feed; drop the cached copy with
-   `python manage.py shell -c "from apps.feeds.robots import invalidate; invalidate('<host>')"`
-   only if it was changed.
-4. To resume a feed early:
-   `UPDATE feeds_feed SET disabled_until = NULL, consecutive_errors = 0 WHERE id IN (...);`
-   then `POST /api/v1/feeds/{id}/refresh/` as staff.
+3. To resume a feed early, `POST /api/v1/feeds/{id}/refresh/` as staff: it ends the pause
+   and the feed is fetched within a minute. For many feeds at once:
+   `UPDATE feeds_feed SET disabled_until = NULL, consecutive_errors = 0, next_fetch_at = now() WHERE id IN (...);`
+
+## Feeds blocked by robots.txt
+
+**Symptom:** `last_status = robots_blocked`. Such feeds are not paused; every interval they
+are checked again against the cached robots.txt, without a request to the site.
+
+**Causes:** robots.txt disallows the feed path for the product token of `USER_AGENT` (or for
+`*`), or the site answered robots.txt with a `5xx` / was unreachable — that counts as
+"disallow everything" for 30 minutes, then robots.txt is fetched again.
+
+**Remediation:** if the site owner changed robots.txt, drop the cached copy (otherwise it is
+kept for 24 h):
+`python manage.py shell -c "from apps.feeds.robots import invalidate; invalidate('<host>')"`.
 
 ## Search misses articles that exist
 
@@ -95,7 +105,8 @@ FROM articles_article GROUP BY 1 ORDER BY 1 DESC LIMIT 12;
 ```
 
 **Remediation:**
-1. Soft-delete older articles sooner than the weekly default of 365 days:
+1. Soft-delete older articles sooner than the weekly default of 365 days (one run stops
+   after 4 minutes; run it again for a large backlog):
    `docker compose exec worker celery -A newsforge call tasks.scheduler.cleanup_old_articles --args='[180]'`.
 2. Soft-deleted rows stay in the table. Remove them through the ORM, which also deletes their
    tags and delivery log rows (the foreign keys have no `ON DELETE CASCADE` in the database):

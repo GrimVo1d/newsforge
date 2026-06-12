@@ -29,3 +29,12 @@ def test_should_disable_triggers_at_six():
 def test_disabled_until_is_24h_ahead():
     now = datetime(2026, 5, 6, tzinfo=UTC)
     assert disabled_until(now) - now == timedelta(hours=DISABLE_HOURS)
+
+
+def test_backoff_never_exceeds_a_pause():
+    now = datetime(2026, 5, 6, tzinfo=UTC)
+    for base in (1800, 86_400):
+        later = next_attempt_at(
+            base_seconds=base, consecutive_errors=6, now=now, jitter_range=(1.5, 1.5)
+        )
+        assert later - now == timedelta(seconds=max(base, DISABLE_HOURS * 3600))

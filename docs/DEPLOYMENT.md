@@ -81,7 +81,7 @@ all clients behind the proxy share one bucket.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `USER_AGENT` | `newsforge/0.1` | sent with every outbound request |
+| `USER_AGENT` | `newsforge/0.1` | sent with every outbound request; its product token (`newsforge`) selects the robots.txt rules |
 | `HTTP_TIMEOUT` | `20` | seconds per feed fetch, all redirects included |
 | `MAX_RESPONSE_BYTES` | `5242880` | feed body cap |
 | `MAX_ENTRIES_PER_FETCH` | `200` | entries taken from one fetch |

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import socket
+from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
+from django.utils import timezone
 
 from apps.feeds.models import Feed
 from apps.tags.models import ArticleTag, Tag, TagRule
@@ -61,6 +63,48 @@ def test_staff_manage_feeds(staff_api):
     assert staff_api.post(f"/api/v1/feeds/{feed_id}/refresh/").status_code == 202
     assert staff_api.delete(f"/api/v1/feeds/{feed_id}/").status_code == 204
     assert Feed.objects.get(pk=feed_id).is_deleted
+
+
+def test_deleted_feed_can_be_added_again(staff_api, feed):
+    feed.etag, feed.consecutive_errors, feed.last_status = '"old"', 4, "http_error"
+    feed.save()
+    assert staff_api.delete(f"/api/v1/feeds/{feed.id}/").status_code == 204
+    resp = staff_api.post("/api/v1/feeds/", {"url": feed.url, "language": "russian"}, format="json")
+    assert resp.status_code == 201, resp.json()
+    assert resp.json()["id"] == feed.id
+    feed.refresh_from_db()
+    assert (feed.is_deleted, feed.is_active, feed.language) == (False, True, "russian")
+    assert (feed.etag, feed.consecutive_errors, feed.last_status) == (None, 0, "")
+
+
+def test_live_feed_url_must_be_unique(staff_api, feed):
+    resp = staff_api.post("/api/v1/feeds/", {"url": feed.url}, format="json")
+    assert resp.status_code == 400
+    other = Feed.objects.create(url="https://other.example.internal/rss")
+    resp = staff_api.patch(f"/api/v1/feeds/{other.id}/", {"url": feed.url}, format="json")
+    assert resp.status_code == 400
+
+
+def test_changing_the_url_resets_crawl_state(staff_api, feed):
+    feed.etag, feed.last_modified, feed.consecutive_errors = '"v1"', "yesterday", 6
+    feed.disabled_until = timezone.now() + timedelta(hours=3)
+    feed.save()
+    resp = staff_api.patch(
+        f"/api/v1/feeds/{feed.id}/", {"url": "https://moved.example.internal/rss"}, format="json"
+    )
+    assert resp.status_code == 200, resp.json()
+    feed.refresh_from_db()
+    assert (feed.etag, feed.last_modified, feed.consecutive_errors) == (None, None, 0)
+    assert feed.disabled_until is None
+    assert feed.next_fetch_at <= timezone.now()
+
+
+def test_refresh_ends_a_pause(staff_api, feed):
+    feed.disabled_until = timezone.now() + timedelta(hours=3)
+    feed.save()
+    assert staff_api.post(f"/api/v1/feeds/{feed.id}/refresh/").status_code == 202
+    feed.refresh_from_db()
+    assert feed.disabled_until is None
 
 
 def test_feed_interval_has_a_floor(staff_api):

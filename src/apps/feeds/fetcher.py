@@ -20,6 +20,11 @@ class FetchResult:
     body: bytes | None
     etag: str | None
     last_modified: str | None
+    # Where the body came from, after redirects (the base URL for relative links).
+    url: str | None = None
+    # The final URL when every redirect was permanent; the feed's URL should move there.
+    permanent_url: str | None = None
+    content_type: str | None = None
 
 
 def fetch(
@@ -53,7 +58,9 @@ def fetch(
         return FetchResult("network_error", None, None, None, None)
 
     if resp.status_code == 304:
-        return FetchResult("not_modified", 304, None, etag, last_modified)
+        return FetchResult(
+            "not_modified", 304, None, etag, last_modified, permanent_url=resp.permanent_url
+        )
     if resp.status_code >= 300:
         return FetchResult("http_error", resp.status_code, None, None, None)
     return FetchResult(
@@ -62,4 +69,7 @@ def fetch(
         resp.content,
         resp.headers.get("etag"),
         resp.headers.get("last-modified"),
+        url=resp.url,
+        permanent_url=resp.permanent_url,
+        content_type=resp.headers.get("content-type"),
     )

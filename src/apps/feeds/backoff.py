@@ -9,6 +9,7 @@ from django.utils import timezone
 
 MAX_ERROR_EXPONENT = 6
 DISABLE_HOURS = 24
+MAX_DELAY_SECONDS = DISABLE_HOURS * 3600
 
 
 def next_attempt_at(
@@ -21,7 +22,8 @@ def next_attempt_at(
     now = now or timezone.now()
     exponent = min(consecutive_errors, MAX_ERROR_EXPONENT)
     jitter = random.uniform(*jitter_range)
-    delay = base_seconds * (2**exponent) * jitter
+    # Never wait longer than a pause (or one interval, for feeds polled less often than that).
+    delay = min(base_seconds * (2**exponent) * jitter, max(base_seconds, MAX_DELAY_SECONDS))
     return now + timedelta(seconds=delay)
 
 

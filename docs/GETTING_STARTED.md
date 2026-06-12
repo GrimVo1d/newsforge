@@ -78,7 +78,9 @@ Staff see the crawl state of every feed (`last_status`, `consecutive_errors`,
 
 `last_status` is one of `ok`, `not_modified`, `http_error`, `network_error`, `parse_error`,
 `too_large`, `ssrf_blocked`, `robots_blocked`. After an error the next attempt is delayed
-exponentially; after 6 consecutive errors the feed is paused for 24 hours.
+exponentially; after 6 consecutive errors the feed is paused for 24 hours (`refresh` ends
+the pause). Changing a feed's `url` resets its crawl state; adding the URL of a deleted feed
+again restores that feed with its articles.
 
 ## 4. Read and search
 
@@ -211,7 +213,7 @@ the production settings.
 |---|---|
 | `make up` hangs on `api` | `make logs`; `migrate` must exit 0 first (`docker compose logs migrate`) |
 | feed stays without `last_fetched_at` | `docker compose logs worker beat`; is the feed `is_active` and not `disabled_until`? |
-| `last_status: robots_blocked` | the site's robots.txt disallows the feed path for `USER_AGENT` |
+| `last_status: robots_blocked` | the site's robots.txt disallows the feed path for the product token of `USER_AGENT` (`newsforge`), or robots.txt answered `5xx` (rechecked after 30 minutes) |
 | `last_status: ssrf_blocked` | the host resolves to a private address or does not resolve, or a redirect leads to such a host or to `http://`; the worker log has the details |
 | no emails in Mailpit | `GET /subscriptions/{id}/deliveries/`; does the query match the article's language? |
 | `429` responses | throttling; tune `THROTTLE_*` |

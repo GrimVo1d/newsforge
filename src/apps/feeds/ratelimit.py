@@ -1,7 +1,7 @@
-"""Per-domain token-bucket rate limit for outbound fetches, backed by Redis.
+"""Per-domain minimum interval between outbound fetches, backed by Redis.
 
-Atomic via SET NX EX: a lock key with TTL = min interval. If SET NX succeeds,
-the caller "got the token"; otherwise the domain is on cooldown.
+Atomic via SET NX EX: a key with TTL = the interval. If SET NX succeeds the caller may
+fetch; otherwise the domain is on cooldown.
 """
 
 from __future__ import annotations

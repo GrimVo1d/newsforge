@@ -1,14 +1,22 @@
 from __future__ import annotations
 
+from typing import Any
+
 from django.conf import settings
+from django.db import IntegrityError, transaction
 from rest_framework import serializers
 
 from apps.feeds.models import Feed
 from apps.feeds.validators import SSRFError, assert_public_url
 
+DUPLICATE_URL = "a feed with this url already exists"
+
 
 class FeedSerializer(serializers.ModelSerializer[Feed]):
     """Full view for staff, including crawl state."""
+
+    # Uniqueness is checked against live feeds only: a deleted feed's URL can be added again.
+    url = serializers.CharField(max_length=2048)
 
     class Meta:
         model = Feed
@@ -52,7 +60,38 @@ class FeedSerializer(serializers.ModelSerializer[Feed]):
             assert_public_url(value)
         except SSRFError as exc:
             raise serializers.ValidationError({"code": "ssrf_blocked", "detail": str(exc)}) from exc
+        live = Feed.objects.filter(url=value, is_deleted=False)
+        if self.instance is not None:
+            live = live.exclude(pk=self.instance.pk)
+        if live.exists():
+            raise serializers.ValidationError(DUPLICATE_URL)
         return value
+
+    def create(self, validated_data: dict[str, Any]) -> Feed:
+        deleted = Feed.objects.filter(url=validated_data["url"], is_deleted=True).first()
+        if deleted is not None:
+            # Adding a deleted feed again restores it (with its articles) and starts afresh.
+            for name, value in validated_data.items():
+                setattr(deleted, name, value)
+            deleted.is_deleted = False
+            deleted.is_active = validated_data.get("is_active", True)
+            deleted.reset_crawl_state()
+            deleted.save()
+            return deleted
+        try:
+            with transaction.atomic():
+                return super().create(validated_data)
+        except IntegrityError as exc:  # added concurrently
+            raise serializers.ValidationError({"url": [DUPLICATE_URL]}) from exc
+
+    def update(self, instance: Feed, validated_data: dict[str, Any]) -> Feed:
+        if "url" in validated_data and validated_data["url"] != instance.url:
+            instance.reset_crawl_state()
+        try:
+            with transaction.atomic():
+                return super().update(instance, validated_data)
+        except IntegrityError as exc:  # a deleted feed still holds that url
+            raise serializers.ValidationError({"url": [DUPLICATE_URL]}) from exc
 
 
 class PublicFeedSerializer(serializers.ModelSerializer[Feed]):

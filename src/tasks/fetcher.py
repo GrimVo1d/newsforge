@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import random
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import feedparser
@@ -12,7 +13,7 @@ from django.utils import timezone as djtz
 
 from apps.articles.normalizer import plain_text
 from apps.feeds.backoff import disabled_until, next_attempt_at, should_disable
-from apps.feeds.fetcher import fetch
+from apps.feeds.fetcher import FetchResult, fetch
 from apps.feeds.models import Feed, FeedStatus
 from apps.feeds.ratelimit import try_acquire
 from apps.feeds.robots import is_allowed
@@ -24,8 +25,12 @@ def _entry_published(entry: Any) -> datetime | None:
     parsed = entry.get("published_parsed") or entry.get("updated_parsed")
     if not parsed:
         return None
-    year, month, day, hour, minute, second = parsed[:6]
-    return datetime(year, month, day, hour, minute, second, tzinfo=UTC)
+    try:
+        year, month, day, hour, minute, second = parsed[:6]
+        # A leap second (":60") is stored as the last second of that minute.
+        return datetime(year, month, day, hour, minute, min(second, 59), tzinfo=UTC)
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 def _record_failure(feed: Feed, status: str) -> dict[str, Any]:
@@ -50,6 +55,15 @@ def _record_failure(feed: Feed, status: str) -> dict[str, Any]:
     return {"status": status}
 
 
+def _follow_permanent_redirect(feed: Feed, result: FetchResult) -> list[str]:
+    """Move the feed to the target of a permanent redirect, unless another feed has it."""
+    new_url = result.permanent_url
+    if not new_url or new_url == feed.url or Feed.objects.filter(url=new_url).exists():
+        return []
+    feed.url = new_url
+    return ["url"]
+
+
 @shared_task(name="tasks.fetcher.fetch_feed", acks_late=True)
 def fetch_feed(feed_id: int) -> dict[str, Any]:
     feed = Feed.objects.filter(pk=feed_id, is_deleted=False, is_active=True).first()
@@ -63,16 +77,29 @@ def fetch_feed(feed_id: int) -> dict[str, Any]:
         return {"status": FeedStatus.ROBOTS_BLOCKED}
 
     if not try_acquire(feed.url):
+        # Another feed on this host was fetched just now: retry soon, not after a full interval.
+        delay = settings.PER_DOMAIN_MIN_INTERVAL * random.uniform(1, 2)
+        feed.next_fetch_at = djtz.now() + timedelta(seconds=delay)
+        feed.save(update_fields=["next_fetch_at", "updated_at"])
         return {"status": "rate_limited"}
 
     result = fetch(feed.url, etag=feed.etag, last_modified=feed.last_modified)
     feed.last_fetched_at = djtz.now()
 
     if result.status == "not_modified":
+        moved = _follow_permanent_redirect(feed, result)
         feed.last_status = FeedStatus.NOT_MODIFIED
         feed.consecutive_errors = 0
+        feed.disabled_until = None
         feed.save(
-            update_fields=["last_status", "last_fetched_at", "consecutive_errors", "updated_at"]
+            update_fields=[
+                *moved,
+                "last_status",
+                "last_fetched_at",
+                "consecutive_errors",
+                "disabled_until",
+                "updated_at",
+            ]
         )
         return {"status": FeedStatus.NOT_MODIFIED}
 
@@ -104,6 +131,7 @@ def fetch_feed(feed_id: int) -> dict[str, Any]:
             }
         )
 
+    moved = _follow_permanent_redirect(feed, result)
     meta = parsed.get("feed") or {}
     feed.title = plain_text(meta.get("title"), 500) or feed.title
     site_url = str(meta.get("link") or "")
@@ -116,6 +144,7 @@ def fetch_feed(feed_id: int) -> dict[str, Any]:
     feed.disabled_until = None
     feed.save(
         update_fields=[
+            *moved,
             "title",
             "site_url",
             "etag",

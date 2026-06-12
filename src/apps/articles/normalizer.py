@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import html
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import bleach
@@ -165,6 +165,10 @@ def normalize_entry(
     clean_body = sanitize_html(body)
     lang = detect_language(f"{clean_title}\n{clean_summary}\n{clean_body}")
     digest = content_hash(canonical, clean_title, clean_body or clean_summary)
+    if published_at is not None:
+        if published_at.tzinfo is None:
+            published_at = published_at.replace(tzinfo=UTC)
+        published_at = min(published_at, datetime.now(UTC))  # no articles from the future
     return NormalizedEntry(
         canonical_url=canonical,
         url=url,

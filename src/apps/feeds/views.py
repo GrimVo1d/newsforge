@@ -42,7 +42,8 @@ class FeedViewSet(viewsets.ModelViewSet[Feed]):
     def refresh(self, request: Request, pk: str | None = None) -> Response:
         feed = self.get_object()
         feed.next_fetch_at = timezone.now()
-        feed.save(update_fields=["next_fetch_at", "updated_at"])
+        feed.disabled_until = None  # an explicit refresh also ends a pause
+        feed.save(update_fields=["next_fetch_at", "disabled_until", "updated_at"])
         return Response(
             {"queued_at": feed.next_fetch_at.isoformat()},
             status=status.HTTP_202_ACCEPTED,

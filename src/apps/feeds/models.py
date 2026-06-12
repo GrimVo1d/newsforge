@@ -52,3 +52,12 @@ class Feed(models.Model):
 
     def __str__(self) -> str:
         return self.url
+
+    def reset_crawl_state(self) -> None:
+        """Forget what was learned about the old URL; the feed is fetched again right away."""
+        self.etag = None
+        self.last_modified = None
+        self.last_status = ""
+        self.consecutive_errors = 0
+        self.disabled_until = None
+        self.next_fetch_at = timezone.now()

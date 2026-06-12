@@ -62,23 +62,31 @@ scoped to their owner in the queryset, so other users get `404`.
 `enqueue_due_feeds` selects up to 200 feeds with `next_fetch_at <= now()` that are active and
 not paused, locking them with `FOR UPDATE SKIP LOCKED`, moves their `next_fetch_at` forward
 by `interval_seconds`, commits, and queues one `fetch_feed` per feed. Concurrent Beat
-instances cannot queue the same feed twice.
+instances cannot queue the same feed twice. A queued fetch expires after `interval_seconds`,
+so a backlog of workers does not pile up duplicates of the same feed.
 
 ### Fetching (`tasks.fetcher`, `apps.feeds`)
 
 1. **robots.txt** — `robots.is_allowed` fetches `/robots.txt` through the safe client
-   (at most 200 KB, truncated beyond that), caches the body for 24 h in Redis and evaluates
-   it with `urllib.robotparser`. A missing file or an unreachable host means "allowed"; a host
-   that resolves to a private address means "disallowed".
+   (at most 500 KB, truncated beyond that) and evaluates it per RFC 9309: the groups for the
+   product token of `USER_AGENT` (`newsforge`), else the `*` groups; the longest matching rule
+   wins, `Allow` on a tie; `*` and `$` patterns. A `4xx` means "allowed" and is cached for
+   24 h; a `5xx` or network error means "disallowed" for 30 minutes; a host that is not
+   public is "allowed" here (30 minutes), so the fetch itself reports `ssrf_blocked`. A
+   blocked feed is not paused: it is checked again every interval against the cached copy.
 2. **Rate limit** — `ratelimit.try_acquire` sets `rl:fetch:<host>` with `NX` and a TTL of
-   `PER_DOMAIN_MIN_INTERVAL`; if the key exists the fetch is skipped until the next round.
+   `PER_DOMAIN_MIN_INTERVAL`; if the key exists the fetch is skipped and the feed is due again
+   after 1–2 × `PER_DOMAIN_MIN_INTERVAL`.
 3. **Conditional GET** — `If-None-Match` / `If-Modified-Since` from the stored validators.
-   `304` → `not_modified`; other statuses ≥ 300 (after redirects) → `http_error`.
+   `304` → `not_modified`; other statuses ≥ 300 (after redirects) → `http_error`. When every
+   redirect on the way was permanent (`301` / `308`), the feed's URL moves to the target,
+   unless another feed already has it.
 4. **Parsing** — `feedparser`; a UTF-8 BOM is stripped first. A malformed document with no
    entries → `parse_error`. On success the feed's title, site URL and validators are saved.
 5. **Failures** — `consecutive_errors` grows, `next_fetch_at` is pushed out by
-   `interval × 2^min(errors, 6) × jitter(0.5–1.5)`, and after 6 errors in a row the feed is
-   paused for 24 hours (`disabled_until`).
+   `interval × 2^min(errors, 6) × jitter(0.5–1.5)` (at most 24 h, or one interval if that is
+   longer), and after 6 errors in a row the feed is paused for 24 hours (`disabled_until`).
+   Any successful fetch, `304` included, or a staff `refresh` ends the pause.
 
 ### Safe outbound HTTP (`apps.core.safe_http`)
 
@@ -162,7 +170,7 @@ Beat schedule (`newsforge/celery.py`, UTC):
 | `enqueue-due-feeds` | `tasks.scheduler.enqueue_due_feeds` | every 60 s |
 | `daily-digest` | `tasks.digest.daily_digest` | 09:00 daily |
 | `refresh-robots-cache` | `tasks.scheduler.refresh_robots_cache` | 04:00 daily (drops cached robots.txt) |
-| `cleanup-old-articles` | `tasks.scheduler.cleanup_old_articles` | Sunday 03:00 (soft-deletes articles published over 365 days ago) |
+| `cleanup-old-articles` | `tasks.scheduler.cleanup_old_articles` | Sunday 03:00 (soft-deletes articles published, or stored if undated, over 365 days ago; batches of 5000 for at most 4 minutes) |
 
 ## Operations endpoints
 

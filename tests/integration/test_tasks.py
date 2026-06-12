@@ -91,12 +91,70 @@ def test_fetch_feed_parse_error(feed, allow_robots):
 
 
 def test_fetch_feed_not_modified_resets_errors(feed, allow_robots):
-    feed.consecutive_errors = 3
+    feed.consecutive_errors = 6
+    feed.disabled_until = timezone.now() - timedelta(minutes=1)  # a pause that just ended
     feed.save()
     with _fetch_returns(FetchResult("not_modified", 304, None, None, None)):
         assert fetch_feed(feed.id) == {"status": FeedStatus.NOT_MODIFIED}
     feed.refresh_from_db()
-    assert feed.consecutive_errors == 0
+    assert (feed.consecutive_errors, feed.disabled_until) == (0, None)
+
+
+def test_rate_limited_feed_is_retried_soon(feed, allow_robots, settings):
+    assert ratelimit.try_acquire(feed.url)
+    before = timezone.now()
+    with _fetch_returns(_ok(b"")) as fetch:
+        assert fetch_feed(feed.id) == {"status": "rate_limited"}
+    fetch.assert_not_called()
+    feed.refresh_from_db()
+    interval = timedelta(seconds=settings.PER_DOMAIN_MIN_INTERVAL)
+    assert before + interval <= feed.next_fetch_at <= timezone.now() + 2 * interval
+
+
+@pytest.mark.parametrize("status", ["ok", "not_modified"])
+def test_permanent_redirect_moves_the_feed(feed, allow_robots, status):
+    new_url = "https://new.example.internal/feed.xml"
+    body = (FIXTURES / "sample_en.xml").read_bytes() if status == "ok" else None
+    result = FetchResult(status, 200, body, None, None, permanent_url=new_url)
+    with _fetch_returns(result):
+        fetch_feed(feed.id)
+    feed.refresh_from_db()
+    assert feed.url == new_url
+
+
+def test_permanent_redirect_to_another_feed_keeps_the_url(feed, allow_robots):
+    other = Feed.objects.create(url="https://new.example.internal/feed.xml", is_deleted=True)
+    body = (FIXTURES / "sample_en.xml").read_bytes()
+    with _fetch_returns(FetchResult("ok", 200, body, None, None, permanent_url=other.url)):
+        assert fetch_feed(feed.id)["status"] == FeedStatus.OK
+    feed.refresh_from_db()
+    assert feed.url == "https://example.internal/feed.xml"
+
+
+def test_entry_dates_are_robust():
+    import feedparser
+
+    from tasks.fetcher import _entry_published
+
+    rss = (FIXTURES / "sample_en.xml").read_text()
+    leap = feedparser.parse(rss).entries[0]
+    leap["published_parsed"] = (2025, 12, 31, 23, 59, 60, 2, 365, 0)
+    assert _entry_published(leap).second == 59
+    leap["published_parsed"] = (2025, 13, 45, 0, 0, 0, 0, 0, 0)
+    assert _entry_published(leap) is None
+
+
+def test_future_dates_are_clamped_to_now(feed):
+    from tasks.articles import process_article
+
+    res = process_article(
+        feed_id=feed.id,
+        url="https://example.internal/f",
+        title="From the future",
+        guid="f1",
+        published_at="2099-01-01T00:00:00+00:00",
+    )
+    assert Article.objects.get(pk=res["article_id"]).published_at <= timezone.now()
 
 
 def test_fetch_feed_respects_robots_and_rate_limit(feed):
@@ -150,17 +208,31 @@ def test_enqueue_due_feeds(feed):
 
     with patch("tasks.fetcher.fetch_feed.apply_async") as apply_async:
         assert enqueue_due_feeds() == {"enqueued": 1}
-    apply_async.assert_called_once_with(args=(feed.id,))
+    apply_async.assert_called_once_with(args=(feed.id,), expires=feed.interval_seconds)
     feed.refresh_from_db()
     assert feed.next_fetch_at > timezone.now() + timedelta(seconds=feed.interval_seconds - 60)
 
 
-def test_cleanup_old_articles(make_article):
-    old, fresh = make_article("Old news"), make_article("Fresh news")
-    Article.objects.filter(pk=old.pk).update(published_at=timezone.now() - timedelta(days=400))
+def test_cleanup_old_articles(make_article, monkeypatch):
+    monkeypatch.setattr("tasks.scheduler.CLEANUP_BATCH", 1)  # several batches
+    old, undated, fresh = (make_article(t) for t in ("Old news", "Undated", "Fresh news"))
+    long_ago = timezone.now() - timedelta(days=400)
+    Article.objects.filter(pk=old.pk).update(published_at=long_ago)
+    Article.objects.filter(pk=undated.pk).update(published_at=None, created_at=long_ago)
     Article.objects.filter(pk=fresh.pk).update(published_at=timezone.now())
-    assert cleanup_old_articles() == {"soft_deleted": 1}
-    assert Article.objects.get(pk=old.pk).is_deleted
+    assert cleanup_old_articles() == {"soft_deleted": 2}
+    assert set(Article.objects.filter(is_deleted=True).values_list("pk", flat=True)) == {
+        old.pk,
+        undated.pk,
+    }
+
+
+def test_due_feeds_have_no_unused_partial_index():
+    from django.db import connection
+
+    with connection.cursor() as cur:
+        cur.execute("SELECT 1 FROM pg_indexes WHERE indexname = 'feeds_due_partial_idx'")
+        assert cur.fetchone() is None
 
 
 def test_refresh_robots_cache(feed):
@@ -204,13 +276,56 @@ def test_robots_rules_are_applied_and_cached(public_dns):
 
 
 @pytest.mark.parametrize(
-    "response, allowed",
+    "response, allowed, ttl",
     [
-        (httpx.Response(404), True),
-        (httpx.ConnectError("down"), True),
-        (robots.safe_http.UnsafeURLError("private"), False),
+        (httpx.Response(404), True, robots.CACHE_TTL_SECONDS),
+        (httpx.Response(503), False, robots.RETRY_TTL_SECONDS),
+        (httpx.ConnectError("down"), False, robots.RETRY_TTL_SECONDS),
+        # allowed here, so that the feed fetch itself reports ssrf_blocked
+        (robots.safe_http.UnsafeURLError("private"), True, robots.RETRY_TTL_SECONDS),
     ],
 )
-def test_robots_failures(public_dns, response, allowed):
+def test_robots_failures(public_dns, response, allowed, ttl):
     with _robots_response(response):
         assert robots.is_allowed("https://example.internal/private/feed.xml") is allowed
+    remaining = ratelimit.redis_client().ttl(cache.make_key("robots:example.internal"))
+    assert ttl - 60 < remaining <= ttl
+
+
+def test_robots_uses_the_configured_product_token(public_dns, settings):
+    settings.USER_AGENT = "acmebot/2.0 (+https://acme.example.internal/bot)"
+    body = b"User-agent: *\nAllow: /\n\nUser-agent: AcmeBot\nDisallow: /\n"
+    with _robots_response(httpx.Response(200, content=body)):
+        assert not robots.is_allowed("https://example.internal/feed.xml")
+    assert robots.product_token() == "acmebot"
+
+
+@pytest.mark.parametrize(
+    "rules, path, allowed",
+    [
+        ("Disallow: /\nAllow: /feed.xml", "/feed.xml", True),  # longest match wins
+        ("Allow: /feed\nDisallow: /feed.xml", "/feed.xml", False),
+        ("Allow: /a\nDisallow: /a", "/a", True),  # tie: allow wins
+        ("Disallow: /*.xml$", "/feed.xml", False),
+        ("Disallow: /*.xml$", "/feed.xml?x=1", True),
+        ("Disallow: /private", "/private-feed", False),  # prefix match
+        ("Disallow:", "/feed.xml", True),  # empty rule matches nothing
+        ("Disallow: /%7Euser/", "/~user/feed", False),  # percent-encoding is normalized
+        ("Disallow: /", "/robots.txt", True),
+    ],
+)
+def test_robots_rule_matching(rules, path, allowed):
+    body = f"User-agent: *\n{rules}\n"
+    assert robots.can_fetch(body, f"https://example.internal{path}", "newsforge") is allowed
+
+
+def test_robots_groups_for_one_agent_are_merged():
+    body = (
+        "User-agent: other\nUser-agent: newsforge\nDisallow: /a\n\n"
+        "User-agent: *\nDisallow: /\n\n"
+        "User-agent: NewsForge\nDisallow: /b\n"
+    )
+    assert not robots.can_fetch(body, "https://example.internal/a", "newsforge")
+    assert not robots.can_fetch(body, "https://example.internal/b", "newsforge")
+    assert robots.can_fetch(body, "https://example.internal/c", "newsforge")
+    assert not robots.can_fetch(body, "https://example.internal/c", "otherbot")
