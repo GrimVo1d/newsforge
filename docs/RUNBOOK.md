@@ -50,8 +50,10 @@ SELECT count(*) FROM articles_article WHERE tsv IS NULL AND NOT is_deleted;
 SELECT tgname FROM pg_trigger WHERE tgrelid = 'articles_article'::regclass AND NOT tgisinternal;
 ```
 
-**Remediation:** if the trigger is missing, recreate the function and trigger by running the
-`TRIGGER_SQL` statement from `src/apps/articles/migrations/0001_initial.py` in psql. Then
+**Remediation:** if the trigger is missing, recreate the function with the `TRIGGER_SQL`
+statement from `src/apps/articles/migrations/0006_trigger_search_path_and_full_hash.py` and
+the trigger with the `CREATE TRIGGER` part of `TRIGGER_SQL` in
+`src/apps/articles/migrations/0001_initial.py`, in psql. Then
 rebuild the vectors: `make reindex-tsv`, or in batches on a large table:
 ```sql
 UPDATE articles_article SET title = title

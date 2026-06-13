@@ -30,6 +30,13 @@ def test_list_is_newest_first_and_public(api, articles):
     assert "body" not in rows[0]
 
 
+def test_undated_articles_come_last(api, articles, make_article):
+    undated = make_article("No date")
+    Article.objects.filter(pk=undated.pk).update(published_at=None)
+    rows = api.get(URL).json()["results"]
+    assert rows[-1]["id"] == undated.id
+
+
 def test_detail_includes_body_and_tags(api, articles):
     old, _ = articles
     tag = Tag.objects.create(name="Django", slug="django")

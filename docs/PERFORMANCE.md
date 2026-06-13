@@ -19,8 +19,8 @@ this repository.
 |---|---|
 | `articles_tsv_idx` — GIN on `tsv`, partial `WHERE NOT is_deleted` | full-text search, subscription matching |
 | `articles_title_trgm_idx` — GIN `gin_trgm_ops` on `title` | fuzzy fallback (`title % q`) |
-| `articles_pub_idx` — `published_at DESC` | `/articles/` listing, `sort=date` |
-| `articles_feed_pub_idx` — `(feed_id, published_at DESC)` | `/articles/?feed=` |
+| `articles_pub_idx` — `(published_at DESC NULLS LAST, id DESC)` | `/articles/` listing, `sort=date` |
+| `articles_feed_pub_idx` — `(feed_id, published_at DESC NULLS LAST, id DESC)` | `/articles/?feed=` |
 | `articles_feed_guid_uniq`, `articles_feed_hash_uniq` — unique | dedup on insert |
 | `feeds_due_basic_idx` — `next_fetch_at` | `enqueue_due_feeds` |
 | `delivery_log_unique` — `(subscription_id, article_id)` | delivery dedup and log updates |

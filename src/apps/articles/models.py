@@ -3,6 +3,7 @@ from __future__ import annotations
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVectorField
 from django.db import models
+from django.db.models import F
 
 
 class Article(models.Model):
@@ -23,13 +24,23 @@ class Article(models.Model):
     last_seen_at = models.DateTimeField(auto_now=True)
     is_deleted = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+    # Set once tagging and subscription fan-out are queued for the article.
+    processed_at = models.DateTimeField(null=True, blank=True)
     tsv = SearchVectorField(null=True, editable=False)
 
     class Meta:
         db_table = "articles_article"
         indexes = [
-            models.Index(fields=["feed", "-published_at"], name="articles_feed_pub_idx"),
-            models.Index(fields=["-published_at"], name="articles_pub_idx"),
+            # Same order as the listings: newest first, undated articles last.
+            models.Index(
+                F("feed"),
+                F("published_at").desc(nulls_last=True),
+                F("id").desc(),
+                name="articles_feed_pub_idx",
+            ),
+            models.Index(
+                F("published_at").desc(nulls_last=True), F("id").desc(), name="articles_pub_idx"
+            ),
             GinIndex(fields=["tsv"], name="articles_tsv_idx", condition=models.Q(is_deleted=False)),
         ]
 

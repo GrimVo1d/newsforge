@@ -6,7 +6,7 @@ from typing import Any
 from celery import shared_task
 
 from apps.articles.normalizer import InvalidEntryError, normalize_entry
-from apps.articles.services import upsert_article
+from apps.articles.services import claim_processing, release_processing, upsert_article
 from apps.articles.signals import article_created
 
 
@@ -21,6 +21,7 @@ def process_article(
     guid: str = "",
     author: str | None = None,
     published_at: str | None = None,
+    feed_language: str = "simple",
 ) -> dict[str, Any]:
     pub = datetime.fromisoformat(published_at) if published_at else None
     try:
@@ -32,14 +33,21 @@ def process_article(
             guid=guid,
             author=author,
             published_at=pub,
+            fallback_language=feed_language,
         )
     except InvalidEntryError as exc:
         return {"skipped": str(exc)}
     result = upsert_article(feed_id, entry)
-    if result.inserted:
-        article_created.send(
-            sender="tasks.articles.process_article",
-            article_id=result.article_id,
-            feed_id=feed_id,
-        )
+    # Claimed separately from the insert: when queueing failed (or the worker died) after an
+    # insert, the redelivered task finds the article unprocessed and queues it then.
+    if claim_processing(result.article_id):
+        try:
+            article_created.send(
+                sender="tasks.articles.process_article",
+                article_id=result.article_id,
+                feed_id=feed_id,
+            )
+        except Exception:
+            release_processing(result.article_id)
+            raise
     return {"article_id": result.article_id, "inserted": result.inserted}

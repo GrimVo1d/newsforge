@@ -75,3 +75,46 @@ def test_entry_title_and_author_are_plain_text():
 def test_entry_link_must_be_http(url):
     with pytest.raises(InvalidEntryError):
         normalize_entry(url=url, title="t", summary="", body="")
+
+
+def test_tracking_params_are_matched_exactly():
+    url = "https://example.internal/a?ref=rss&reference=1&refresh=2&mc_cid=x&mc_list=y"
+    assert canonicalize_url(url) == "https://example.internal/a?mc_list=y&reference=1&refresh=2"
+
+
+def test_bad_port_is_an_invalid_entry():
+    with pytest.raises(InvalidEntryError):
+        normalize_entry(url="https://example.internal:99999/a", title="t", summary="", body="")
+
+
+def test_language_is_detected_on_visible_text():
+    summary = (
+        '<p><img src="https://cdn.example.com/images/2026/release-announcement-banner.png"'
+        ' alt="release banner"><a href="https://github.com/example/project/releases/tag/'
+        'v2.0.0-final">Читать далее о новой версии проекта</a></p>'
+    )
+    entry = normalize_entry(
+        url="https://example.internal/l", title="Вышел релиз", summary=summary, body=""
+    )
+    assert entry.language == "russian"
+
+
+def test_fallback_language_is_whitelisted():
+    entry = normalize_entry(
+        url="https://example.internal/l",
+        title="x",
+        summary="",
+        body="",
+        fallback_language="pg_catalog.english",
+    )
+    assert entry.language == "simple"
+
+
+def test_html_is_capped_before_sanitizing():
+    from apps.articles.normalizer import MAX_HTML_CHARS
+
+    entry = normalize_entry(
+        url="https://example.internal/l", title="t", summary="", body="<p>" + "a" * 300_000
+    )
+    assert len(entry.body) <= MAX_HTML_CHARS + len("</p>")
+    assert entry.body.endswith("</p>")

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import django_filters
-from django.db.models import Prefetch, QuerySet
+from django.db.models import F, Prefetch, QuerySet
 from rest_framework import permissions, serializers, viewsets
 
 from apps.articles.models import Article
@@ -39,7 +39,7 @@ class ArticleViewSet(viewsets.ReadOnlyModelViewSet[Article]):
         return (
             Article.objects.filter(is_deleted=False, feed__is_deleted=False)
             .prefetch_related(tags)
-            .order_by("-published_at", "-id")
+            .order_by(F("published_at").desc(nulls_last=True), "-id")
             .distinct()
         )
 

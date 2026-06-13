@@ -329,3 +329,49 @@ def test_robots_groups_for_one_agent_are_merged():
     assert not robots.can_fetch(body, "https://example.internal/b", "newsforge")
     assert robots.can_fetch(body, "https://example.internal/c", "newsforge")
     assert not robots.can_fetch(body, "https://example.internal/c", "otherbot")
+
+
+def test_relative_links_and_http_charset(feed, allow_robots):
+    title = "Новости дня"
+    body = (
+        f'<?xml version="1.0"?><rss version="2.0"><channel><title>{title}</title>'
+        f"<item><guid>r1</guid><link>/posts/1</link><title>{title}</title></item>"
+        "<item><guid>r2</guid><link>javascript:alert(1)</link><title>x</title></item>"
+        "</channel></rss>"
+    ).encode("cp1251")
+    result = FetchResult(
+        "ok",
+        200,
+        body,
+        None,
+        None,
+        url="https://cdn.example.internal/feeds/main.xml",
+        content_type="application/rss+xml; charset=windows-1251",
+    )
+    with _fetch_returns(result):
+        assert fetch_feed(feed.id)["status"] == FeedStatus.OK
+    article = Article.objects.get(guid="r1")
+    assert (article.title, article.url) == (title, "https://cdn.example.internal/posts/1")
+    feed.refresh_from_db()
+    assert feed.title == title
+
+
+def test_tag_rules_match_visible_text(user, make_article):
+    from apps.articles.normalizer import normalize_entry
+    from apps.articles.services import upsert_article
+    from apps.tags.engine import apply_rules_to_article
+
+    furniture = Tag.objects.create(name="Furniture", slug="furniture")
+    telco = Tag.objects.create(name="ATT", slug="att")
+    TagRule.objects.create(owner=user, name="t", keywords=["table"], tag=furniture)
+    TagRule.objects.create(owner=user, name="a", keywords=["at&t"], tag=telco)
+    entry = normalize_entry(
+        url="https://example.internal/m",
+        title="Quarterly results",
+        guid="m1",
+        summary="<p>AT&amp;T posted results</p>",
+        body="<table><tr><td>1</td></tr></table>",
+    )
+    feed_id = make_article("seed").feed_id
+    assigned = apply_rules_to_article(upsert_article(feed_id, entry).article_id)
+    assert assigned == [telco.id]

@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from apps.articles.models import Article
+from apps.articles.normalizer import MAX_HTML_CHARS, plain_text
 from apps.tags.models import ArticleTag, TagRule
 
 
 def _haystack(article: Article) -> str:
-    return " ".join([article.title, article.summary, article.body]).lower()
+    # Keywords match the visible text, not markup ("table" in <table>) or entities (&amp;).
+    visible = (plain_text(html, MAX_HTML_CHARS) for html in (article.summary, article.body))
+    return " ".join([article.title, *visible]).lower()
 
 
 def apply_rules_to_article(article_id: int) -> list[int]:

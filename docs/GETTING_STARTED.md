@@ -71,7 +71,8 @@ curl -s -X POST $API/feeds/ -H "Authorization: Bearer $STAFF" \
 - `interval_seconds` is the polling interval, at least 300 (default 1800).
 - A new feed is due immediately; Beat picks it up within a minute. To fetch an existing feed
   right away: `POST $API/feeds/{id}/refresh/`.
-- `language` on a feed is informational: each article's language is detected from its text.
+- Each article's language is detected from its text; a feed's `language` is used for articles
+  too short or ambiguous for detection.
 
 Staff see the crawl state of every feed (`last_status`, `consecutive_errors`,
 `next_fetch_at`, `disabled_until`); everyone else sees active feeds without it.
@@ -112,8 +113,8 @@ curl -s -X POST $API/articles/42/tags/ -H "Authorization: Bearer $STAFF" \
   -H 'Content-Type: application/json' -d '{"tag_id": 1}'
 ```
 
-Rules run on new articles only (case-insensitive substring match against title, summary
-and body; `match` is `any` or `all`; an optional `language` limits a rule to one language).
+Rules run on new articles only (case-insensitive substring match against the text of title,
+summary and body, without markup; `match` is `any` or `all`; an optional `language` limits a rule to one language).
 
 ## 6. Subscriptions
 

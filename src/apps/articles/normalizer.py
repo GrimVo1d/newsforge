@@ -1,10 +1,10 @@
 """Normalization helpers for incoming feed entries.
 
-- canonicalize_url: drop UTM query params, drop fragment, lower-case host.
+- canonicalize_url: drop tracking query params, drop fragment, lower-case host.
 - plain_text: titles and authors are stored as text, without markup or entities.
-- sanitize_html: bleach with conservative whitelist (summary / body).
-- content_hash: deterministic sha256.
-- detect_language: langdetect with fixed seed; fallback 'simple'.
+- sanitize_html: bleach with conservative whitelist (summary / body), input capped in size.
+- content_hash: deterministic sha256 over the canonical URL, title and full text.
+- detect_language: langdetect with fixed seed on plain text; fallback 'simple'.
 """
 
 from __future__ import annotations
@@ -57,16 +57,27 @@ ALLOWED_ATTRIBUTES = {
     "img": ["src", "alt", "title"],
 }
 
-_UTM_PREFIXES = ("utm_", "fbclid", "gclid", "yclid", "mc_", "ref")
+_TRACKING_PREFIXES = ("utm_",)
+_TRACKING_PARAMS = {"fbclid", "gclid", "yclid", "mc_cid", "mc_eid", "ref"}
 _SUPPORTED_LANGS = {"ru": "russian", "en": "english"}
 
 MAX_URL_CHARS = 2048
 MAX_TITLE_CHARS = 1000
 MAX_AUTHOR_CHARS = 255
+# Summary and body HTML is cut to this many characters before sanitizing; the full-text index
+# of one row is limited to 1 MB.
+MAX_HTML_CHARS = 200_000
+# Longer guids are stored as their sha256, so the unique index stays within its row limit.
+MAX_GUID_CHARS = 512
 
 
 class InvalidEntryError(ValueError):
     """The feed entry cannot be stored (e.g. its link is not an http(s) URL)."""
+
+
+def _no_nul(value: str | None) -> str:
+    # PostgreSQL text cannot hold NUL.
+    return (value or "").replace("\x00", "")
 
 
 def plain_text(value: str | None, max_chars: int) -> str:
@@ -76,10 +87,14 @@ def plain_text(value: str | None, max_chars: int) -> str:
 
 
 def check_link(url: str) -> str:
-    url = (url or "").strip()
+    url = _no_nul(url).strip()
     parsed = urlparse(url)
     if parsed.scheme.lower() not in ("http", "https") or not parsed.hostname:
         raise InvalidEntryError(f"not an http(s) link: {url[:100]!r}")
+    try:
+        parsed.port  # noqa: B018 - raises ValueError for a malformed port
+    except ValueError as exc:
+        raise InvalidEntryError(f"bad port in link: {url[:100]!r}") from exc
     if len(url) > MAX_URL_CHARS:
         raise InvalidEntryError("link too long")
     return url
@@ -90,7 +105,8 @@ def canonicalize_url(url: str) -> str:
     cleaned_query = [
         (k, v)
         for k, v in parse_qsl(parsed.query, keep_blank_values=False)
-        if not any(k.lower().startswith(p) for p in _UTM_PREFIXES)
+        if k.lower() not in _TRACKING_PARAMS
+        and not any(k.lower().startswith(p) for p in _TRACKING_PREFIXES)
     ]
     cleaned_query.sort()
     host = (parsed.hostname or "").lower()
@@ -106,7 +122,7 @@ def canonicalize_url(url: str) -> str:
 
 def sanitize_html(html: str) -> str:
     cleaned: str = bleach.clean(
-        html or "",
+        _no_nul(html)[:MAX_HTML_CHARS],
         tags=ALLOWED_TAGS,
         attributes=ALLOWED_ATTRIBUTES,
         strip=True,
@@ -127,8 +143,16 @@ def detect_language(text: str) -> str:
 
 
 def content_hash(canonical_url: str, title: str, body: str) -> str:
-    payload = f"{canonical_url}\n{title.strip()}\n{(body or '').strip()[:512]}".encode()
+    # Migration articles.0006 computes the same value in SQL; keep them in step.
+    payload = f"{canonical_url}\n{title.strip()}\n{(body or '').strip()}".encode()
     return hashlib.sha256(payload).hexdigest()
+
+
+def normalize_guid(guid: str | None) -> str:
+    guid = _no_nul(guid).strip()
+    if len(guid) > MAX_GUID_CHARS:
+        return "sha256:" + hashlib.sha256(guid.encode()).hexdigest()
+    return guid
 
 
 @dataclass(slots=True)
@@ -156,14 +180,22 @@ def normalize_entry(
     guid: str = "",
     author: str | None = None,
     published_at: datetime | None = None,
+    fallback_language: str = "simple",
 ) -> NormalizedEntry:
-    """Raises InvalidEntryError for entries that must be skipped."""
+    """Raises InvalidEntryError for entries that must be skipped.
+
+    ``fallback_language`` (the feed's language) is used when the text is too short or too
+    ambiguous for detection.
+    """
     url = check_link(url)
     canonical = canonicalize_url(url)
-    clean_title = plain_text(title, MAX_TITLE_CHARS)
+    clean_title = plain_text(_no_nul(title), MAX_TITLE_CHARS)
     clean_summary = sanitize_html(summary)
     clean_body = sanitize_html(body)
-    lang = detect_language(f"{clean_title}\n{clean_summary}\n{clean_body}")
+    visible = (plain_text(html, MAX_HTML_CHARS) for html in (clean_summary, clean_body))
+    lang = detect_language(" ".join([clean_title, *visible]))
+    if lang == "simple" and fallback_language in _SUPPORTED_LANGS.values():
+        lang = fallback_language
     digest = content_hash(canonical, clean_title, clean_body or clean_summary)
     if published_at is not None:
         if published_at.tzinfo is None:
@@ -175,9 +207,9 @@ def normalize_entry(
         title=clean_title,
         summary=clean_summary,
         body=clean_body,
-        author=plain_text(author, MAX_AUTHOR_CHARS) or None,
+        author=plain_text(_no_nul(author), MAX_AUTHOR_CHARS) or None,
         language=lang,
         content_hash=digest,
-        guid=guid,
+        guid=normalize_guid(guid),
         published_at=published_at,
     )

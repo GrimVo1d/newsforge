@@ -5,6 +5,7 @@ from __future__ import annotations
 import random
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import urljoin
 
 import feedparser
 from celery import shared_task
@@ -107,7 +108,11 @@ def fetch_feed(feed_id: int) -> dict[str, Any]:
         return _record_failure(feed, result.status)
 
     body = result.body.removeprefix(UTF8_BOM)  # some servers send a BOM
-    parsed = feedparser.parse(body)
+    # The HTTP charset decides the encoding. No base URL is passed: feedparser would resolve
+    # relative guids too and change the dedup key; entry links are resolved below instead.
+    headers = {"content-type": result.content_type} if result.content_type else {}
+    parsed = feedparser.parse(body, response_headers=headers)
+    base_url = result.url or feed.url
     entries = list(parsed.entries or [])
     if parsed.bozo and not entries:
         return _record_failure(feed, FeedStatus.PARSE_ERROR)
@@ -118,16 +123,18 @@ def fetch_feed(feed_id: int) -> dict[str, Any]:
         content = entry.get("content") or []
         body_html = content[0].get("value", "") if content else ""
         published = _entry_published(entry)
+        link = entry.get("link") or ""
         process_article.apply_async(
             kwargs={
                 "feed_id": feed.id,
-                "url": entry.get("link") or "",
+                "url": urljoin(base_url, link) if link else "",
                 "title": entry.get("title") or "",
                 "summary": entry.get("summary") or "",
                 "body": body_html,
                 "guid": entry.get("id") or entry.get("guid") or "",
                 "author": entry.get("author"),
                 "published_at": published.isoformat() if published else None,
+                "feed_language": feed.language,
             }
         )
 

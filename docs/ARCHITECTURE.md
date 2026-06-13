@@ -16,7 +16,7 @@
                                              v
                                       process_article ── normalize ── upsert ──> PostgreSQL
                                              │                                   (tsv trigger)
-                                             │  article_created (real inserts only)
+                                             │  article_created (once per article)
                                              v
                           chain: apply_tag_rules ──> fanout_instant ──> deliver ── webhook
                                                                            │      └ email
@@ -101,37 +101,49 @@ variables are ignored. See [ADR-0003](ADR/0003-ssrf-guard.md).
 
 ### Normalization (`apps.articles.normalizer`)
 
-- The entry link must be an absolute `http(s)` URL (at most 2048 characters), otherwise the
-  entry is skipped.
+- The feed is decoded with the HTTP `charset` when the server sends one. Relative entry
+  links are resolved against the final feed URL (after redirects); the guid is kept as sent.
+- The entry link must then be an `http(s)` URL with a valid port (at most 2048 characters),
+  otherwise the entry is skipped.
 - `canonicalize_url` lower-cases scheme and host, drops default ports, the fragment and
-  tracking parameters (`utm_*`, `fbclid`, `gclid`, `yclid`, `mc_*`, `ref*`) and sorts the query.
+  tracking parameters (`utm_*`, `fbclid`, `gclid`, `yclid`, `mc_cid`, `mc_eid`, `ref`) and
+  sorts the query.
 - Title and author become plain text: tags stripped, entities decoded, whitespace collapsed.
-- Summary and body are sanitized with a `bleach` whitelist (basic formatting, links, images,
-  tables; `http`, `https` and `mailto` URLs only).
-- `detect_language` uses `langdetect` with a fixed seed and maps `ru`/`en` to the `russian`/
-  `english` configurations; short or unrecognized text becomes `simple`.
-- `content_hash` is SHA-256 over the canonical URL, the title and the first 512 characters of
-  the body (or the summary).
+  NUL characters are removed from every field; a guid over 512 characters is replaced by its
+  SHA-256.
+- Summary and body are cut to 200 000 characters and sanitized with a `bleach` whitelist
+  (basic formatting, links, images, tables; `http`, `https` and `mailto` URLs only).
+- `detect_language` runs on the visible text (no markup), uses `langdetect` with a fixed seed
+  and maps `ru`/`en` to the `russian`/`english` configurations; for short or unrecognized
+  text the feed's `language` is used, else `simple`.
+- Publication dates in the future are replaced by the current time.
+- `content_hash` is SHA-256 over the canonical URL, the title and the whole body (or the
+  summary).
 
 ### Deduplication (`apps.articles.services`)
 
 Two unique indexes, both per feed: `(feed_id, guid) WHERE guid <> ''` and
 `(feed_id, content_hash)`. `upsert_article` inserts with `ON CONFLICT DO NOTHING`; on a
-conflict it bumps `last_seen_at` on the existing row (the guid match wins over the hash
-match). Only real inserts fire `article_created`. See [ADR-0004](ADR/0004-dedup-precedence.md).
+conflict it updates a row with the same guid whose content changed, or else bumps
+`last_seen_at` on the existing row (the guid match wins over the hash match).
+`article_created` fires once per article, for whichever task first sets its `processed_at`.
+See [ADR-0004](ADR/0004-dedup-precedence.md).
 
 ### Full-text index
 
 `articles_article.tsv` is maintained by a `BEFORE INSERT OR UPDATE OF title, summary, body,
 language` trigger: title weight A, summary B, body C, each passed through `unaccent` and
-`to_tsvector(language::regconfig, ...)`. A partial GIN index covers non-deleted rows; a
+`to_tsvector(language::regconfig, ...)` (at most 1000 / 100 000 / 300 000 characters, as one
+`tsvector` is limited to 1 MB). The function pins its `search_path`, so it works whatever the
+session's setting. A partial GIN index covers non-deleted rows; a
 trigram GIN index on `title` serves the fuzzy fallback. See [ADR-0001](ADR/0001-tsvector-trigger.md),
 [ADR-0002](ADR/0002-per-article-regconfig.md) and [SEARCH.md](SEARCH.md).
 
 ### Tag rules (`apps.tags.engine`)
 
 Runs for every new article: each active rule (optionally limited to one language) checks its
-keywords as case-insensitive substrings of title + summary + body; `any` needs one hit,
+keywords as case-insensitive substrings of the visible text of title + summary + body
+(markup stripped, entities decoded); `any` needs one hit,
 `all` needs every keyword. Matching tags are attached once.
 
 ### Subscriptions (`tasks.notifications`, `tasks.digest`)
