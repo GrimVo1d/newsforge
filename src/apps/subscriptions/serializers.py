@@ -3,21 +3,34 @@ from __future__ import annotations
 from typing import Any
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
+from django.db import transaction
 from rest_framework import serializers
 
+from apps.feeds.models import Feed
 from apps.feeds.validators import SSRFError, assert_public_url
 from apps.subscriptions.models import Subscription, new_webhook_secret
+from apps.tags.models import Tag
 
 MAX_FILTER_IDS = 100
+MAX_ID = 2**63 - 1  # bigint
+
+
+def _target_field(delivery: str) -> str:
+    return "email_to" if delivery == Subscription.Delivery.EMAIL else "webhook_url"
 
 
 class SubscriptionSerializer(serializers.ModelSerializer[Subscription]):
     q = serializers.CharField(max_length=256)
     feeds = serializers.ListField(
-        child=serializers.IntegerField(min_value=1), max_length=MAX_FILTER_IDS, required=False
+        child=serializers.IntegerField(min_value=1, max_value=MAX_ID),
+        max_length=MAX_FILTER_IDS,
+        required=False,
     )
     tag_ids = serializers.ListField(
-        child=serializers.IntegerField(min_value=1), max_length=MAX_FILTER_IDS, required=False
+        child=serializers.IntegerField(min_value=1, max_value=MAX_ID),
+        max_length=MAX_FILTER_IDS,
+        required=False,
     )
     webhook_url = serializers.CharField(
         max_length=2048, required=False, allow_null=True, allow_blank=True
@@ -51,7 +64,28 @@ class SubscriptionSerializer(serializers.ModelSerializer[Subscription]):
             raise serializers.ValidationError(str(exc)) from exc
         return value
 
+    def validate_feeds(self, value: list[int]) -> list[int]:
+        found = set(
+            Feed.objects.filter(pk__in=value, is_deleted=False).values_list("pk", flat=True)
+        )
+        missing = sorted(set(value) - found)
+        if missing:
+            raise serializers.ValidationError(f"unknown feed ids: {missing}")
+        return sorted(set(value))
+
+    def validate_tag_ids(self, value: list[int]) -> list[int]:
+        found = set(Tag.objects.filter(pk__in=value).values_list("pk", flat=True))
+        missing = sorted(set(value) - found)
+        if missing:
+            raise serializers.ValidationError(f"unknown tag ids: {missing}")
+        return sorted(set(value))
+
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        if not self.partial:
+            # A full update replaces the filters too; leaving them out clears them.
+            attrs.setdefault("feeds", [])
+            attrs.setdefault("tag_ids", [])
+
         def current(field: str) -> Any:
             if field in attrs:
                 return attrs[field]
@@ -68,19 +102,45 @@ class SubscriptionSerializer(serializers.ModelSerializer[Subscription]):
             )
         return attrs
 
+    def _check_target(self, owner_id: int, delivery: str, target: str | None) -> None:
+        """Bound how many accounts can point their subscriptions at one address or URL."""
+        if not target:
+            return
+        others = Subscription.objects.exclude(owner_id=owner_id)
+        if delivery == Subscription.Delivery.EMAIL:
+            others = others.filter(email_to__iexact=target)
+        else:
+            others = others.filter(webhook_url=target)
+        limit = settings.MAX_ACCOUNTS_PER_TARGET
+        if others.values("owner_id").distinct().count() >= limit:
+            raise serializers.ValidationError(
+                {"detail": f"this target is already used by {limit} other accounts"}
+            )
+
     def create(self, validated: dict[str, Any]) -> Subscription:
         owner = self.context["request"].user
         limit = settings.MAX_SUBSCRIPTIONS_PER_USER
-        if Subscription.objects.filter(owner=owner).count() >= limit:
-            raise serializers.ValidationError(
-                {"detail": f"at most {limit} subscriptions per user; delete one first"}
-            )
-        validated["owner"] = owner
-        instance = super().create(validated)
-        self._ensure_secret(instance)
+        with transaction.atomic():
+            # Lock the owner, so parallel requests cannot all pass the count below.
+            get_user_model().objects.select_for_update().filter(pk=owner.pk).first()
+            if Subscription.objects.filter(owner=owner).count() >= limit:
+                raise serializers.ValidationError(
+                    {"detail": f"at most {limit} subscriptions per user; delete one first"}
+                )
+            delivery = validated.get("delivery", "")
+            self._check_target(owner.pk, delivery, validated.get(_target_field(delivery)))
+            validated["owner"] = owner
+            instance = super().create(validated)
+            self._ensure_secret(instance)
         return instance
 
     def update(self, instance: Subscription, validated: dict[str, Any]) -> Subscription:
+        delivery = validated.get("delivery", instance.delivery)
+        field = _target_field(delivery)
+        target = validated.get(field, getattr(instance, field))
+        current = getattr(instance, _target_field(instance.delivery))
+        if (delivery, target) != (instance.delivery, current):
+            self._check_target(instance.owner_id, delivery, target)
         instance = super().update(instance, validated)
         self._ensure_secret(instance)
         return instance

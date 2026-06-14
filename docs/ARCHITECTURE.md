@@ -153,14 +153,17 @@ Articles of deleted feeds are never matched.
 - **instant** — `fanout_instant` runs after `apply_tag_rules` (a Celery chain) and selects
   subscriptions whose query matches the article (parsed in the article's language) and whose
   `feeds` / `tag_ids` filters, if set, include it.
-- **daily** — `daily_digest` at 09:00 UTC matches articles created since the subscription's
-  previous run (or the last 24 h), newest first, at most 100 per subscription.
-- **deliver** — skips pairs already delivered successfully; sends a signed webhook
+- **daily** — `daily_digest` at 09:00 UTC matches articles created after the subscription's
+  previous run (or in the last 24 h) and up to the start of this run by the database clock,
+  newest first, at most 100 per subscription.
+- **deliver** — skips pairs already delivered successfully and waits for a pair another
+  task is sending (a 2-minute lease on the log row); sends a signed webhook
   (`X-NF-Timestamp`, `X-NF-Signature: sha256=HMAC(secret, "<ts>." + body)`,
   `X-Idempotency-Key`) or an email; records every attempt in `subscriptions_deliverylog`
   (one row per subscription and article, with `attempts`, `succeeded`, `http_status`,
   `error`). Retries: up to 5 with exponential backoff for `5xx`, `408`, `429`, network and
-  SMTP errors. See [ADR-0005](ADR/0005-at-least-once-delivery.md).
+  temporary SMTP errors; a `5xx` SMTP refusal is final. See
+  [ADR-0005](ADR/0005-at-least-once-delivery.md).
 
 ## Celery
 

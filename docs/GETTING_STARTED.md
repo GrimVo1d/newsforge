@@ -121,7 +121,9 @@ summary and body, without markup; `match` is `any` or `all`; an optional `langua
 A subscription is a saved query plus optional `feeds` and `tag_ids` filters. `interval` is
 `instant` (checked for every new article) or `daily` (a batch at 09:00 UTC covering
 articles since the previous run, at most 100). Each user can keep up to 20 subscriptions
-(`MAX_SUBSCRIPTIONS_PER_USER`).
+(`MAX_SUBSCRIPTIONS_PER_USER`), and one email address or webhook URL can be used by at most 5
+other accounts (`MAX_ACCOUNTS_PER_TARGET`). The `feeds` and `tag_ids` filters must name
+existing feeds and tags; a `PUT` without them clears them, a `PATCH` keeps them.
 
 ### Email
 
@@ -180,9 +182,11 @@ Delivery rules:
 
 - A `2xx` answer counts as delivered. Redirects are not followed; a `3xx` is a failed delivery.
 - `5xx`, `408`, `429`, timeouts and connection errors are retried with exponential backoff,
-  up to 5 retries. Other `4xx` answers are final.
+  up to 5 retries. Other `4xx` answers are final. The answer's body is not read.
 - Every attempt is recorded; see them with `GET $API/subscriptions/{id}/deliveries/`
-  (`succeeded`, `attempts`, `http_status`, `error`).
+  (`succeeded`, `attempts`, `http_status`, `error`), newest pair first. For email,
+  `http_status` holds the SMTP reply code: `250` when the server accepted the message, the
+  refusal code (e.g. `550`) when it refused the recipient for good.
 - The webhook URL is re-checked on every attempt; a URL that now resolves to a private
   address is recorded as `blocked` and not retried.
 

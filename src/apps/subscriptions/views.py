@@ -42,7 +42,8 @@ class SubscriptionViewSet(viewsets.ModelViewSet[Subscription]):
     @action(detail=True, methods=["get"])
     def deliveries(self, request: Request, pk: str | None = None) -> Response:
         sub = self.get_object()
-        rows = DeliveryLog.objects.filter(subscription=sub).order_by("-delivered_at", "-id")
+        # By id, not delivered_at: retries update delivered_at and would reshuffle the pages.
+        rows = DeliveryLog.objects.filter(subscription=sub).order_by("-id")
         paginator = LimitOffsetPagination()
         page = paginator.paginate_queryset(rows, request, view=self)
         return paginator.get_paginated_response(DeliveryLogSerializer(page, many=True).data)

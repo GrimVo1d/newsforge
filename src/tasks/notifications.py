@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import smtplib
 import time
+from datetime import timedelta
 from typing import Any
 
 import httpx
@@ -14,6 +16,7 @@ from django.conf import settings
 from django.core.mail import send_mail
 from django.db import connection, transaction
 from django.db.models import F
+from django.utils import timezone
 
 from apps.articles.models import Article
 from apps.core import safe_http
@@ -21,6 +24,8 @@ from apps.subscriptions.models import DeliveryLog, Subscription
 
 MAX_SUBJECT_CHARS = 200
 MAX_ERROR_CHARS = 1000
+# Longer than any single attempt (webhook timeout 10 s, SMTP) and shorter than the retries.
+LEASE = timedelta(minutes=2)
 
 
 class RetryableDeliveryError(Exception):
@@ -29,6 +34,10 @@ class RetryableDeliveryError(Exception):
     def __init__(self, status_code: int) -> None:
         super().__init__(f"receiver answered {status_code}")
         self.status_code = status_code
+
+
+class DeliveryInFlightError(Exception):
+    """Another task is sending this pair right now; retry after its lease ends."""
 
 
 def sign(secret: str, timestamp: int, body: bytes) -> str:
@@ -57,6 +66,23 @@ def _subject(title: str) -> str:
     return f"[newsforge] {' '.join(title.split())}"[:MAX_SUBJECT_CHARS]
 
 
+def _claim(subscription_id: int, article_id: int) -> bool:
+    """Take the send lease for a pair; False when it was delivered already."""
+    now = timezone.now()
+    with transaction.atomic():
+        log, _ = DeliveryLog.objects.select_for_update().get_or_create(
+            subscription_id=subscription_id,
+            article_id=article_id,
+            defaults={"succeeded": False, "attempts": 0},
+        )
+        if log.succeeded:
+            return False
+        if log.leased_until is not None and log.leased_until > now:
+            raise DeliveryInFlightError(f"{subscription_id}:{article_id}")
+        DeliveryLog.objects.filter(pk=log.pk).update(leased_until=now + LEASE)
+    return True
+
+
 def _record(
     subscription_id: int,
     article_id: int,
@@ -65,17 +91,17 @@ def _record(
     http_status: int | None,
     error: str | None,
 ) -> None:
-    values = {
-        "succeeded": succeeded,
+    """Log an attempt and release the lease. A delivered pair is never marked failed again."""
+    values: dict[str, Any] = {
         "http_status": http_status,
         "error": error[:MAX_ERROR_CHARS] if error else None,
+        "leased_until": None,
     }
-    with transaction.atomic():
-        log, created = DeliveryLog.objects.select_for_update().get_or_create(
-            subscription_id=subscription_id, article_id=article_id, defaults=values
-        )
-        if not created:
-            DeliveryLog.objects.filter(pk=log.pk).update(**values, attempts=F("attempts") + 1)
+    if succeeded:
+        values["succeeded"] = True
+    DeliveryLog.objects.filter(
+        subscription_id=subscription_id, article_id=article_id, succeeded=False
+    ).update(**values, attempts=F("attempts") + 1, delivered_at=timezone.now())
 
 
 def _send_webhook(sub: Subscription, body: bytes, idempotency_key: str) -> int:
@@ -102,6 +128,32 @@ def _send_webhook(sub: Subscription, body: bytes, idempotency_key: str) -> int:
     return resp.status_code
 
 
+def _send_email(sub: Subscription, article: Article) -> int:
+    """Send the mail; return the SMTP code of a final answer, raise for one worth retrying.
+
+    A refused recipient (5xx) or refused message is final; temporary (4xx) answers,
+    connection problems and our own configuration errors (authentication, sender) are retried.
+    """
+    try:
+        send_mail(
+            subject=_subject(article.title),
+            message=article.url,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[sub.email_to or ""],
+            fail_silently=False,
+        )
+    except smtplib.SMTPRecipientsRefused as exc:
+        codes = [code for code, _ in exc.recipients.values()]
+        if codes and all(code >= 500 for code in codes):
+            return int(codes[0])
+        raise
+    except smtplib.SMTPDataError as exc:
+        if exc.smtp_code >= 500:
+            return int(exc.smtp_code)
+        raise
+    return 250
+
+
 @shared_task(
     name="tasks.notifications.deliver",
     acks_late=True,
@@ -109,6 +161,7 @@ def _send_webhook(sub: Subscription, body: bytes, idempotency_key: str) -> int:
         httpx.HTTPError,
         safe_http.DeadlineExceededError,
         RetryableDeliveryError,
+        DeliveryInFlightError,
         OSError,  # includes smtplib.SMTPException
     ),
     retry_backoff=30,
@@ -116,27 +169,23 @@ def _send_webhook(sub: Subscription, body: bytes, idempotency_key: str) -> int:
     max_retries=5,
 )
 def deliver(subscription_id: int, article_id: int) -> dict[str, Any]:
-    if DeliveryLog.objects.filter(
-        subscription_id=subscription_id, article_id=article_id, succeeded=True
-    ).exists():
-        return {"deduped": True}
+    sub = Subscription.objects.filter(pk=subscription_id, is_active=True).first()
+    article = Article.objects.filter(
+        pk=article_id, is_deleted=False, feed__is_deleted=False
+    ).first()
+    if sub is None or article is None:
+        # Paused or deleted meanwhile: nothing to send, nothing to retry.
+        return {"status": None, "error": "gone"}
 
-    sub = Subscription.objects.get(pk=subscription_id, is_active=True)
-    article = Article.objects.get(pk=article_id, is_deleted=False)
+    if not _claim(subscription_id, article_id):
+        return {"deduped": True}
 
     try:
         if sub.delivery == Subscription.Delivery.WEBHOOK and sub.webhook_url:
             body = json.dumps(_payload(article), separators=(",", ":")).encode()
             status = _send_webhook(sub, body, _idempotency_key(subscription_id, article_id))
         elif sub.delivery == Subscription.Delivery.EMAIL and sub.email_to:
-            send_mail(
-                subject=_subject(article.title),
-                message=article.url,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[sub.email_to],
-                fail_silently=False,
-            )
-            status = 250
+            status = _send_email(sub, article)
         else:
             _record(sub.id, article.id, succeeded=False, http_status=None, error="no target")
             return {"status": None, "error": "no target"}
@@ -164,7 +213,7 @@ def deliver(subscription_id: int, article_id: int) -> dict[str, Any]:
 _MATCH_INSTANT_SQL = """
 SELECT s.id
 FROM subscriptions_subscription s
-JOIN articles_article a ON a.id = %(aid)s
+JOIN articles_article a ON a.id = %(aid)s AND NOT a.is_deleted
 JOIN feeds_feed f ON f.id = a.feed_id AND NOT f.is_deleted
 WHERE s.is_active
   AND s.interval = 'instant'

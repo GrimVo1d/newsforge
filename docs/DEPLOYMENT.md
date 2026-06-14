@@ -61,6 +61,7 @@ Settings are read from the environment (`django-environ`); compose also loads `.
 | `THROTTLE_ANON` | `120/min` |
 | `THROTTLE_USER` | `600/min` |
 | `THROTTLE_AUTH` | `10/min` (register, token, refresh) |
+| `THROTTLE_REGISTER` | `20/day` (accounts created per client address) |
 | `THROTTLE_SEARCH` | `60/min` |
 | `NUM_PROXIES` | `0` |
 
@@ -76,6 +77,7 @@ all clients behind the proxy share one bucket.
 | Variable | Default | Notes |
 |---|---|---|
 | `MAX_SUBSCRIPTIONS_PER_USER` | `20` | creating one more answers `400` |
+| `MAX_ACCOUNTS_PER_TARGET` | `5` | other accounts that may already deliver to the same email address or webhook URL; one more answers `400` |
 
 ### Crawler
 

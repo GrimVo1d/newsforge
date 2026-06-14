@@ -24,7 +24,8 @@ STRIDE applied to the crawler, the API and subscription delivery.
 
 - **Stolen access tokens** — access tokens live 15 minutes, refresh tokens 7 days.
 - **Brute force** — register / token / refresh endpoints share a 10 requests per minute
-  throttle per client address; `X-Forwarded-For` is ignored unless `NUM_PROXIES` says how many
+  throttle per client address, and registration also has a daily cap (20 accounts per
+  address); `X-Forwarded-For` is ignored unless `NUM_PROXIES` says how many
   trusted proxies set it, so a client cannot pick a fresh bucket per request. Django password
   validators reject weak passwords.
 - **Forged webhooks** — every delivery is signed with HMAC-SHA256 over timestamp and body
@@ -74,7 +75,10 @@ STRIDE applied to the crawler, the API and subscription delivery.
 - **Webhook backpressure** — bounded retries with backoff; already delivered pairs are
   skipped.
 - **Subscription abuse** — at most `MAX_SUBSCRIPTIONS_PER_USER` (20) subscriptions per user,
-  which bounds the matching work per article and the mail / webhook volume per account.
+  checked under a lock on the user, which bounds the matching work per article and the mail /
+  webhook volume per account; one email address or webhook URL can be the target of at most
+  `MAX_ACCOUNTS_PER_TARGET` (5) other accounts, and new accounts per address are capped per
+  day, so many accounts cannot be pointed at one victim.
 
 ### Elevation of privilege
 
@@ -90,10 +94,11 @@ STRIDE applied to the crawler, the API and subscription delivery.
   works until it expires (7 days). A token blacklist would need extra storage.
 - **Username enumeration.** Registration answers `409 username_taken`; the auth throttle
   limits how fast this can be probed.
-- **No email confirmation, no per-target delivery limit.** A user can subscribe any address
-  or webhook URL. Mails and webhooks go there only for queries the user chose, at most once per
-  matching article and subscription, and identify the service; the subscription cap bounds the
-  volume per account, but many accounts can still point at one target.
+- **No email confirmation.** A user can subscribe any address or webhook URL. Mails and
+  webhooks go there only for queries the user chose, at most once per matching article and
+  subscription, and identify the service. The per-target cap counts exact webhook URLs, not
+  hosts (shared webhook services such as chat integrations put every customer on one host),
+  so one host can still receive several URLs' worth of deliveries.
 - **Plaintext webhook secrets in the database.** Needed for HMAC; database access already
   means full control.
 - **Redis without a password** in the compose stack. It is not published beyond localhost;

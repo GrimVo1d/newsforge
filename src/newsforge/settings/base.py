@@ -110,6 +110,8 @@ REST_FRAMEWORK = {
         "user": env("THROTTLE_USER", default="600/min"),
         # register / token endpoints (ScopedRateThrottle)
         "auth": env("THROTTLE_AUTH", default="10/min"),
+        # account creation per client address, on top of "auth"
+        "register": env("THROTTLE_REGISTER", default="20/day"),
         "search": env("THROTTLE_SEARCH", default="60/min"),
     },
     # Throttles key anonymous clients by address. With NUM_PROXIES unset DRF would use the
@@ -138,6 +140,8 @@ MAX_RESPONSE_BYTES = env.int("MAX_RESPONSE_BYTES", default=5_242_880)
 MAX_ENTRIES_PER_FETCH = env.int("MAX_ENTRIES_PER_FETCH", default=200)
 MIN_FEED_INTERVAL_SECONDS = 300
 MAX_SUBSCRIPTIONS_PER_USER = env.int("MAX_SUBSCRIPTIONS_PER_USER", default=20)
+# How many other accounts may already deliver to one email address or webhook URL.
+MAX_ACCOUNTS_PER_TARGET = env.int("MAX_ACCOUNTS_PER_TARGET", default=5)
 # Allow plain-http feed / webhook URLs (https only by default).
 ALLOW_PLAIN_HTTP = env.bool("ALLOW_PLAIN_HTTP", default=False)
 PER_DOMAIN_MIN_INTERVAL = env.int("PER_DOMAIN_MIN_INTERVAL", default=30)

@@ -50,6 +50,23 @@ def test_auth_endpoints_are_throttled(api, monkeypatch):
     cache.clear()
 
 
+def test_registrations_per_address_are_capped_per_day(api, user, monkeypatch):
+    from django.core.cache import cache
+
+    from apps.core.views import RegisterThrottle
+
+    cache.clear()
+    monkeypatch.setattr(RegisterThrottle, "THROTTLE_RATES", {"register": "2/day"})
+    api.force_authenticate(user)  # signing in does not lift the cap
+    codes = [
+        api.post(REGISTER, {"username": f"new{n}", "password": "pw-Long-enough-42"}).status_code
+        for n in range(3)
+    ]
+    assert codes == [201, 201, 429]
+    assert RegisterThrottle().parse_rate("20/day") == (20, 86400)
+    cache.clear()
+
+
 def test_jwt_lifetimes_are_applied():
     from rest_framework_simplejwt.settings import api_settings
 

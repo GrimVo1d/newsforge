@@ -67,8 +67,11 @@ class DeliveryLog(models.Model):
     delivered_at = models.DateTimeField(auto_now=True)
     succeeded = models.BooleanField(default=False)
     attempts = models.PositiveSmallIntegerField(default=1)
+    # HTTP status of the webhook answer, or the SMTP reply code for email (250 when accepted).
     http_status = models.SmallIntegerField(null=True, blank=True)
     error = models.TextField(null=True, blank=True)
+    # Set while a worker is sending; another task for the same pair waits until it ends.
+    leased_until = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "subscriptions_deliverylog"

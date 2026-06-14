@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import smtplib
 from datetime import timedelta
 
 import httpx
@@ -196,3 +197,125 @@ def test_digest_matches_in_article_language(user, make_article, monkeypatch):
     sub.save()
     Article.objects.filter(pk=ru.pk).update(created_at=timezone.now() - timedelta(hours=25))
     assert daily_digest() == {"deliveries": 0}
+
+
+def test_digest_window_ends_at_the_run_start(user, make_article, monkeypatch):
+    from tasks import digest
+
+    sub = Subscription.objects.create(
+        owner=user,
+        name="daily",
+        q="django",
+        delivery="email",
+        email_to="me@example.internal",
+        interval=Subscription.Interval.DAILY,
+    )
+    article = make_article("Django release notes", language="english")
+    run1 = timezone.now() - timedelta(seconds=5)
+    # Stored while the first run was going on: it belongs to the second run only.
+    Article.objects.filter(pk=article.pk).update(created_at=run1 + timedelta(seconds=1))
+    sub.last_notified_at = run1 - timedelta(days=1)
+    sub.save()
+    queued: list[tuple[int, int]] = []
+    monkeypatch.setattr(deliver, "apply_async", lambda args: queued.append(args))
+    for run in (run1, run1 + timedelta(days=1), run1 + timedelta(days=2)):
+        monkeypatch.setattr(digest, "_db_now", lambda run=run: run)
+        digest.daily_digest()
+    assert queued == [(sub.id, article.id)]
+
+
+def test_fanout_and_delivery_skip_deleted_articles(hook, article, receiver, monkeypatch):
+    Article.objects.filter(pk=article.pk).update(is_deleted=True)
+    queued: list[tuple[int, int]] = []
+    monkeypatch.setattr(deliver, "apply_async", lambda args: queued.append(args))
+    assert fanout_instant(article.id) == {"fanout": 0}
+    assert deliver(hook.id, article.id) == {"status": None, "error": "gone"}
+    assert receiver.calls == []
+
+
+def test_paused_subscription_ends_cleanly(hook, article, receiver):
+    hook.is_active = False
+    hook.save()
+    assert deliver(hook.id, article.id) == {"status": None, "error": "gone"}
+    assert receiver.calls == []
+    assert not DeliveryLog.objects.exists()
+
+
+@pytest.mark.parametrize(
+    ("exc", "final"),
+    [
+        (smtplib.SMTPRecipientsRefused({"me@example.internal": (550, b"no such user")}), True),
+        (smtplib.SMTPDataError(554, b"rejected"), True),
+        (smtplib.SMTPRecipientsRefused({"me@example.internal": (451, b"try later")}), False),
+        (smtplib.SMTPAuthenticationError(535, b"bad credentials"), False),
+        (smtplib.SMTPServerDisconnected("gone"), False),
+    ],
+)
+def test_permanent_smtp_rejections_are_final(user, article, monkeypatch, exc, final):
+    sub = Subscription.objects.create(
+        owner=user, name="m", q="django", delivery="email", email_to="me@example.internal"
+    )
+
+    def refuse(**kwargs):
+        raise exc
+
+    monkeypatch.setattr(notifications, "send_mail", refuse)
+    if final:
+        assert deliver(sub.id, article.id)["succeeded"] is False
+        log = DeliveryLog.objects.get(subscription=sub)
+        assert log.http_status >= 500 and log.leased_until is None
+    else:
+        with pytest.raises(type(exc)):
+            deliver(sub.id, article.id)
+        assert DeliveryLog.objects.get(subscription=sub).leased_until is None
+
+
+def test_email_log_holds_the_smtp_code(user, article):
+    sub = Subscription.objects.create(
+        owner=user, name="m", q="django", delivery="email", email_to="me@example.internal"
+    )
+    assert deliver(sub.id, article.id) == {"status": 250, "succeeded": True}
+    assert DeliveryLog.objects.get(subscription=sub).http_status == 250
+
+
+def test_concurrent_attempt_waits_for_the_lease(hook, article, monkeypatch):
+    from tasks.notifications import DeliveryInFlightError
+
+    sends: list[str] = []
+
+    def fake(method, url, **kwargs):
+        sends.append("A")
+        with pytest.raises(DeliveryInFlightError):  # B starts while A waits for the receiver
+            deliver(hook.id, article.id)
+        raise httpx.ReadTimeout("A timed out")
+
+    monkeypatch.setattr(notifications.safe_http, "request", fake)
+    with pytest.raises(httpx.ReadTimeout):
+        deliver(hook.id, article.id)
+    assert sends == ["A"]
+    log = DeliveryLog.objects.get(subscription=hook, article=article)
+    assert (log.succeeded, log.attempts, log.leased_until) == (False, 1, None)
+
+    # B's retry after A released the lease sends once and succeeds.
+    monkeypatch.setattr(notifications.safe_http, "request", FakeReceiver())
+    assert deliver(hook.id, article.id)["succeeded"] is True
+
+
+def test_success_is_never_downgraded(hook, article, receiver):
+    from tasks.notifications import _record
+
+    deliver(hook.id, article.id)
+    _record(hook.id, article.id, succeeded=False, http_status=None, error="late failure")
+    log = DeliveryLog.objects.get(subscription=hook, article=article)
+    assert (log.succeeded, log.error, log.attempts) == (True, None, 1)
+
+
+def test_expired_lease_is_taken_over(hook, article, receiver):
+    DeliveryLog.objects.create(
+        subscription=hook,
+        article=article,
+        attempts=1,
+        leased_until=timezone.now() - timedelta(seconds=1),  # the sender died
+    )
+    assert deliver(hook.id, article.id)["succeeded"] is True
+    assert DeliveryLog.objects.get(subscription=hook).attempts == 2

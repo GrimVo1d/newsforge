@@ -13,5 +13,11 @@ METRICS_TOKEN = "test-metrics-token"
 # throttling override the rates explicitly.
 REST_FRAMEWORK = {
     **REST_FRAMEWORK,
-    "DEFAULT_THROTTLE_RATES": {"anon": None, "user": None, "auth": None, "search": None},
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": None,
+        "user": None,
+        "auth": None,
+        "register": None,
+        "search": None,
+    },
 }

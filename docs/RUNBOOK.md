@@ -78,7 +78,7 @@ for their countdown.
 
 **Remediation:**
 1. Pause the subscription: `UPDATE subscriptions_subscription SET is_active = false WHERE id = ...;`
-   — queued and retried tasks for it then end with `DoesNotExist` instead of calling out.
+   — queued and retried tasks for it then end (`"error": "gone"`) without calling out.
 2. Re-enable once the receiver is back. Articles matched while it was paused are not
    re-sent; pairs that never succeeded show `succeeded = false` in the log.
 
