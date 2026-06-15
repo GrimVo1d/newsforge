@@ -39,18 +39,31 @@ class FeedIdsField(serializers.Field[list[int], Any, Any, Any]):
         return value
 
 
+class LowercaseChoiceField(serializers.ChoiceField):
+    def to_internal_value(self, data: Any) -> Any:
+        return super().to_internal_value(data.lower() if isinstance(data, str) else data)
+
+
 class SearchParamsSerializer(serializers.Serializer[Any]):
     q = serializers.CharField(
         max_length=MAX_QUERY_CHARS, required=False, default="", allow_blank=True
     )
-    lang = serializers.ChoiceField(choices=LANG_CHOICES, required=False, allow_null=True)
+    lang = LowercaseChoiceField(choices=LANG_CHOICES, required=False, allow_null=True)
     sort = serializers.ChoiceField(choices=("rank", "date"), default="rank")
     feed = FeedIdsField(required=False, default=list)
-    # Sent as ?from= / ?to=; renamed by the view because "from" is a Python keyword.
-    date_from = serializers.DateTimeField(required=False, allow_null=True)
-    date_to = serializers.DateTimeField(required=False, allow_null=True)
     limit = serializers.IntegerField(min_value=1, max_value=100, default=20)
     offset = serializers.IntegerField(min_value=0, max_value=MAX_OFFSET, default=0)
+
+    def get_fields(self) -> dict[str, serializers.Field[Any, Any, Any, Any]]:
+        # ?from= / ?to= cannot be class attributes ("from" is a keyword).
+        fields = super().get_fields()
+        fields["from"] = serializers.DateTimeField(
+            source="date_from", required=False, allow_null=True, help_text="published_at >= from"
+        )
+        fields["to"] = serializers.DateTimeField(
+            source="date_to", required=False, allow_null=True, help_text="published_at < to"
+        )
+        return fields
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         start, end = attrs.get("date_from"), attrs.get("date_to")

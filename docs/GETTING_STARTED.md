@@ -114,7 +114,9 @@ curl -s -X POST $API/articles/42/tags/ -H "Authorization: Bearer $STAFF" \
 ```
 
 Rules run on new articles only (case-insensitive substring match against the text of title,
-summary and body, without markup; `match` is `any` or `all`; an optional `language` limits a rule to one language).
+summary and body, without markup; `match` is `any` or `all`; an optional `language` limits a
+rule to one language). Tagging an article by hand answers `201`, or `200` if it already had
+the tag.
 
 ## 6. Subscriptions
 

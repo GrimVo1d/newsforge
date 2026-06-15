@@ -36,6 +36,12 @@ class SubscriptionSerializer(serializers.ModelSerializer[Subscription]):
         max_length=2048, required=False, allow_null=True, allow_blank=True
     )
     email_to = serializers.EmailField(required=False, allow_null=True, allow_blank=True)
+    # Documented here so that the schema shows it; to_representation drops it unless issued.
+    webhook_secret = serializers.CharField(
+        read_only=True,
+        required=False,
+        help_text="Returned only in the response that issues it (create, switch to webhook).",
+    )
 
     class Meta:
         model = Subscription
@@ -52,6 +58,7 @@ class SubscriptionSerializer(serializers.ModelSerializer[Subscription]):
             "is_active",
             "last_notified_at",
             "created_at",
+            "webhook_secret",
         )
         read_only_fields = ("last_notified_at", "created_at")
 
@@ -114,7 +121,11 @@ class SubscriptionSerializer(serializers.ModelSerializer[Subscription]):
         limit = settings.MAX_ACCOUNTS_PER_TARGET
         if others.values("owner_id").distinct().count() >= limit:
             raise serializers.ValidationError(
-                {"detail": f"this target is already used by {limit} other accounts"}
+                {
+                    _target_field(delivery): [
+                        f"this target is already used by {limit} other accounts"
+                    ]
+                }
             )
 
     def create(self, validated: dict[str, Any]) -> Subscription:
@@ -125,7 +136,7 @@ class SubscriptionSerializer(serializers.ModelSerializer[Subscription]):
             get_user_model().objects.select_for_update().filter(pk=owner.pk).first()
             if Subscription.objects.filter(owner=owner).count() >= limit:
                 raise serializers.ValidationError(
-                    {"detail": f"at most {limit} subscriptions per user; delete one first"}
+                    f"at most {limit} subscriptions per user; delete one first"
                 )
             delivery = validated.get("delivery", "")
             self._check_target(owner.pk, delivery, validated.get(_target_field(delivery)))
@@ -154,6 +165,7 @@ class SubscriptionSerializer(serializers.ModelSerializer[Subscription]):
     def to_representation(self, instance: Subscription) -> dict[str, Any]:
         data = super().to_representation(instance)
         # The secret is returned only in the response that issued it.
+        data.pop("webhook_secret", None)
         issued = getattr(self, "_issued_secret", None)
         if issued:
             data["webhook_secret"] = issued

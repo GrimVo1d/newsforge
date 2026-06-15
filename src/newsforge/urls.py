@@ -15,3 +15,7 @@ urlpatterns = [
     path("health/ready", ReadyView.as_view(), name="health-ready"),
     path("metrics", metrics_view, name="metrics"),
 ]
+
+# Errors outside DRF views (unknown paths, crashes) answer in the API's error envelope too.
+handler404 = "apps.core.exceptions.not_found"
+handler500 = "apps.core.exceptions.server_error"

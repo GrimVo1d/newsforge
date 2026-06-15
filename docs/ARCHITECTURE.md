@@ -49,9 +49,22 @@ go through psycopg placeholders; text-search configuration names come from a whi
 ### API
 
 DRF with SimpleJWT bearer authentication only (no sessions, no admin site). Defaults:
-`IsAuthenticatedOrReadOnly`, limit/offset pagination (`limit` up to 100), anonymous and
-per-user throttles, and the error envelope `{"code": "...", "detail": ...}` from
-`apps.core.exceptions.envelope`.
+`IsAuthenticatedOrReadOnly`, limit/offset pagination (`limit` up to 100, `offset` up to
+10000), anonymous and per-user throttles, and the error envelope from
+`apps.core.exceptions`:
+
+```json
+{"code": "not_found", "detail": "Not found."}
+{"code": "validation_error", "detail": {"q": ["This field is required."],
+                                        "non_field_errors": ["..."]}}
+```
+
+`code` is DRF's error code (`not_found`, `parse_error`, `unsupported_media_type`,
+`method_not_allowed`, `not_authenticated`, `permission_denied`, …), with `rate_limited` for
+throttling (plus a `Retry-After` header), `token_not_valid` for a bad or expired JWT and
+a few view-specific codes such as `username_taken`. `detail` is a message, except for
+`validation_error`, where it maps fields to lists of messages. Unknown paths and unhandled
+errors (`server_error`, no internals) use the same shape.
 
 Shared data — feeds, tags, tag rules, article tags — is written by staff only
 (`apps.core.permissions.IsStaffOrReadOnly`, `IsAdminUser` for tag rules). Subscriptions are

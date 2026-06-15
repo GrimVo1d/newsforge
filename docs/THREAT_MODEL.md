@@ -51,6 +51,7 @@ STRIDE applied to the crawler, the API and subscription delivery.
 ### Information disclosure
 
 - Subscriptions are filtered by owner in the queryset; other users get `404`, not `403`.
+- Unhandled errors answer `{"code": "server_error"}` without a traceback or message.
 - The webhook secret is returned only when issued (create, switch to webhook, rotate).
 - Crawl state of feeds (errors, statuses, schedule) is visible to staff only.
 - `/metrics` answers `404` unless a bearer token matches `METRICS_TOKEN`.
@@ -71,7 +72,8 @@ STRIDE applied to the crawler, the API and subscription delivery.
   trailers stop at the cap; webhook answers are not read beyond the status line and headers;
   at most 200 entries per fetch, Celery soft / hard time limits.
 - **Against the API** — global anonymous and per-user throttles, a separate search throttle,
-  `limit` ≤ 100, `offset` ≤ 10000, `q` ≤ 256 characters, `ts_headline` only on the result page.
+  `limit` ≤ 100 and `offset` ≤ 10000 on every list, `q` ≤ 256 characters, `ts_headline` only
+  on the result page.
 - **Webhook backpressure** — bounded retries with backoff; already delivered pairs are
   skipped.
 - **Subscription abuse** — at most `MAX_SUBSCRIPTIONS_PER_USER` (20) subscriptions per user,
@@ -103,7 +105,10 @@ STRIDE applied to the crawler, the API and subscription delivery.
   means full control.
 - **Redis without a password** in the compose stack. It is not published beyond localhost;
   production should use an authenticated, private Redis.
-- **Public OpenAPI schema.** It describes no secrets; hiding it would be obscurity.
+- **Public OpenAPI schema.** It describes no secrets; hiding it would be obscurity. The
+  Swagger UI page loads its scripts from the jsDelivr CDN (drf-spectacular's default); the
+  API itself does not depend on it. Self-host them (`SWAGGER_UI_DIST`) or drop the route if
+  that matters.
 - **Public feed URLs.** Anonymous users see each feed's `url`. Staff must not add feeds whose
   URL carries a token or other credentials.
 - **Articles of paused feeds stay visible.** An inactive (not deleted) feed is hidden from the

@@ -39,16 +39,19 @@ class ArticleTagView(APIView):
 
     permission_classes = (permissions.IsAdminUser,)
 
-    @extend_schema(request=ArticleTagInputSerializer, responses={201: ArticleTagSerializer})
+    @extend_schema(
+        request=ArticleTagInputSerializer,
+        responses={200: ArticleTagSerializer, 201: ArticleTagSerializer},
+    )
     def post(self, request: Request, article_id: int) -> Response:
         article = get_object_or_404(Article, pk=article_id, is_deleted=False)
         s = ArticleTagInputSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         tag = get_object_or_404(Tag, pk=s.validated_data["tag_id"])
-        ArticleTag.objects.get_or_create(article=article, tag=tag)
+        _, created = ArticleTag.objects.get_or_create(article=article, tag=tag)
         return Response(
             {"article_id": article.id, "tag_id": tag.id},
-            status=status.HTTP_201_CREATED,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
 
     @extend_schema(request=ArticleTagInputSerializer, responses={204: None})

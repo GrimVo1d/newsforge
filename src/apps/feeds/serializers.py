@@ -59,7 +59,7 @@ class FeedSerializer(serializers.ModelSerializer[Feed]):
         try:
             assert_public_url(value)
         except SSRFError as exc:
-            raise serializers.ValidationError({"code": "ssrf_blocked", "detail": str(exc)}) from exc
+            raise serializers.ValidationError(str(exc), code="ssrf_blocked") from exc
         live = Feed.objects.filter(url=value, is_deleted=False)
         if self.instance is not None:
             live = live.exclude(pk=self.instance.pk)

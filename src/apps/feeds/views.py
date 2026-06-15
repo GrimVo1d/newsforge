@@ -26,6 +26,9 @@ class FeedViewSet(viewsets.ModelViewSet[Feed]):
         return qs
 
     def get_serializer_class(self) -> type[serializers.BaseSerializer[Feed]]:
+        if getattr(self, "swagger_fake_view", False):
+            # Schema: reads as everyone sees them, writes as staff send them.
+            return PublicFeedSerializer if self.action in ("list", "retrieve") else FeedSerializer
         if self.request.user.is_staff:
             return FeedSerializer
         return PublicFeedSerializer

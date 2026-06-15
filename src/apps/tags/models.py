@@ -8,7 +8,6 @@ from django.db import models
 class Tag(models.Model):
     name = models.CharField(max_length=64, unique=True)
     slug = models.CharField(max_length=64, unique=True)
-    is_auto = models.BooleanField(default=False)
 
     class Meta:
         db_table = "tags_tag"
