@@ -42,3 +42,18 @@ def test_search_filter_by_feed(feed):
     upsert_article(feed.id, entry)
     found = run_search(query="DRF", feeds=[feed.id], lang="english")
     assert all(r["feed_id"] == feed.id for r in found)
+
+
+@pytest.mark.parametrize("query", ["Djangoo releese", "kubernets"])
+def test_fuzzy_fallback_uses_the_trigram_index(query):
+    from django.db import connection
+
+    from apps.search.queries import TRGM_FALLBACK_SQL
+
+    params = {"query": query, "from": None, "to": None, "feeds": [], "limit": 20, "offset": 0}
+    with connection.cursor() as cur:
+        # The test table is tiny: forbid the scans the planner would prefer for that.
+        cur.execute("SET LOCAL enable_seqscan = off; SET LOCAL enable_indexscan = off;")
+        cur.execute("EXPLAIN " + TRGM_FALLBACK_SQL, {**params, "by_date": False})
+        plan = "\n".join(row[0] for row in cur.fetchall())
+    assert "articles_title_trgm_idx" in plan, plan

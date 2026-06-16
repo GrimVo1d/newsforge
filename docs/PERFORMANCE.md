@@ -18,7 +18,7 @@ this repository.
 | Index | Serves |
 |---|---|
 | `articles_tsv_idx` — GIN on `tsv`, partial `WHERE NOT is_deleted` | full-text search, subscription matching |
-| `articles_title_trgm_idx` — GIN `gin_trgm_ops` on `title` | fuzzy fallback (`title % q`) |
+| `articles_title_trgm_idx` — GIN `gin_trgm_ops` on `title`, partial `WHERE NOT is_deleted` | fuzzy fallback (`title % q`, `title %> q`) |
 | `articles_pub_idx` — `(published_at DESC NULLS LAST, id DESC)` | `/articles/` listing, `sort=date` |
 | `articles_feed_pub_idx` — `(feed_id, published_at DESC NULLS LAST, id DESC)` | `/articles/?feed=` |
 | `articles_feed_guid_uniq`, `articles_feed_hash_uniq` — unique | dedup on insert |
@@ -62,10 +62,13 @@ LockRows
 
 ```
 Limit
-  -> Sort (rank DESC, id DESC)
+  -> Sort (rank DESC, published_at DESC, id DESC)
        -> Bitmap Heap Scan on articles_article a
-            -> Bitmap Index Scan on articles_title_trgm_idx
-                 Index Cond: (title % 'djnago')
+            -> BitmapOr
+                 -> Bitmap Index Scan on articles_title_trgm_idx
+                      Index Cond: (title % 'kubernets')
+                 -> Bitmap Index Scan on articles_title_trgm_idx
+                      Index Cond: (title %> 'kubernets')
 ```
 
 ## Rough capacity (4 CPU / 8 GB node)
@@ -96,4 +99,4 @@ endpoints without FTS should manage about twice that.
 | `MAX_ENTRIES_PER_FETCH` | 200 | entries beyond it are ignored on that fetch |
 | `GUNICORN_WORKERS`, `CELERY_CONCURRENCY` | 4, 4 | per CPU and per number of distinct feed hosts |
 | `worker_prefetch_multiplier` | 1 | keep at 1 while fetches dominate (ADR-0006) |
-| `pg_trgm.similarity_threshold` | 0.3 | lower for more fuzzy matches, higher for fewer |
+| `pg_trgm.similarity_threshold`, `pg_trgm.word_similarity_threshold` | 0.3, 0.6 | lower for more fuzzy matches, higher for fewer |

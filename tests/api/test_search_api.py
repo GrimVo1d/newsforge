@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
+from django.utils import timezone
+
+from apps.articles.models import Article
 
 pytestmark = pytest.mark.django_db
 
@@ -80,6 +85,23 @@ def test_fuzzy_fallback_keeps_filters(api, articles, feed):
     assert api.get(URL, {"q": "Djangoo releese", "feed": 999_999}).json()["count"] == 0
 
 
+def test_fuzzy_fallback_finds_a_typo_inside_a_long_title(api, make_article):
+    # Similar to one word, not to the whole title: found by word similarity.
+    make_article("Kubernetes 1.31 released with new features", language="english")
+    (hit,) = api.get(URL, {"q": "kubernets"}).json()["results"]
+    assert hit["title"].startswith("Kubernetes") and 0 < hit["rank"] <= 1
+
+
+def test_fuzzy_fallback_respects_sort_date(api, make_article):
+    older = make_article("Django release notes", language="english")
+    newer = make_article("Django releases recap", language="english")
+    now = timezone.now()
+    Article.objects.filter(pk=older.pk).update(published_at=now - timedelta(days=3))
+    Article.objects.filter(pk=newer.pk).update(published_at=now)
+    rows = api.get(URL, {"q": "Djangoo releese", "sort": "date"}).json()["results"]
+    assert [r["id"] for r in rows] == [newer.id, older.id]
+
+
 def test_paging_past_the_last_hit_does_not_go_fuzzy(api, articles):
     # One full-text hit; its title is also a trigram match for "django release".
     assert api.get(URL, {"q": "django release"}).json()["count"] == 1
@@ -99,6 +121,21 @@ def test_highlight_is_plain_text_with_marks(api, make_article):
     assert "<img" not in hit["highlight"] and "<a" not in hit["highlight"]
     assert "<b>django</b>" in hit["highlight"].lower()
     assert "&amp;" in hit["highlight"]
+
+
+def test_highlight_marks_accented_words(api, make_article):
+    make_article(
+        "Cafe culture",
+        summary="<p>The best café in town serves coffee and pastries every morning</p>",
+        language="english",
+    )
+    (hit,) = api.get(URL, {"q": "cafe", "lang": "en"}).json()["results"]
+    assert "<b>cafe</b>" in hit["highlight"].lower()
+
+
+def test_rank_is_normalized(api, articles):
+    ranks = [r["rank"] for r in api.get(URL, {"q": "django"}).json()["results"]]
+    assert ranks and all(0 < r < 1 for r in ranks)
 
 
 def test_articles_of_deleted_feeds_are_not_found(api, articles, feed):

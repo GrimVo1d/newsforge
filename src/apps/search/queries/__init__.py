@@ -54,6 +54,7 @@ def run_search(
         "to": date_to,
         "limit": limit,
         "offset": offset,
+        "by_date": sort == "date",
     }
     sql = SEARCH_DATE_SQL if sort == "date" else SEARCH_RANK_SQL
     rows = _fetch(sql, params)

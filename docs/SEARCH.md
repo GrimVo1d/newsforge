@@ -42,7 +42,10 @@ argument, so it applies the default weights `{0.1, 0.2, 0.4, 1.0}` for `{D, C, B
 | C (0.2) | body | longest and noisiest |
 | D | unused | reserved for future |
 
-Normalization mask: `32` (divide rank by `1 + log(doc_length)`). Without it long bodies dominate. We picked 32 over the more aggressive 1+2 because cover density already discounts spread terms.
+Normalization mask: `1|32` (`33`). `1` divides the rank by `1 + log(document length)`, so long
+bodies do not dominate; `32` then maps it to `rank / (rank + 1)`, so `rank` is always in
+`[0, 1)`. We kept `1` rather than the more aggressive `2` (divide by the length itself)
+because cover density already discounts spread terms.
 
 ## Language configs
 
@@ -69,19 +72,27 @@ MaxFragments=2, MinWords=5, MaxWords=20, StartSel=<b>, StopSel=</b>
 operator in the query, so `search_rank.sql` computes it in an outer query over the already
 limited page. Its input is the summary with all tags removed (cut to 2000 characters), so the
 snippet is plain text, HTML-escaped (`&amp;`, `&lt;`), whose only markup is the `<b>` marks.
-It is safe to render as HTML.
+It is safe to render as HTML. Like the index, the input goes through `unaccent`, so `café`
+is marked for the query `cafe`; the snippet is therefore shown without diacritics
+(`café` → `cafe`, `ё` → `е`).
 
 ## Fuzzy fallback (`pg_trgm`)
 
 When the full-text query finds nothing and `q` is at most 24 characters, the endpoint
-answers from `queries/trgm_fallback.sql` instead: trigram similarity of `q` against titles
-(`title % q`, served by the `articles_title_trgm_idx` GIN index), with the same `feed`,
-`from`, `to`, `limit` and `offset` filters. `rank` is then the similarity (0–1) and
-`highlight` is empty. Paging past the last full-text hit (`offset` beyond the matches) returns
+answers from `queries/trgm_fallback.sql` instead: trigram matching of `q` against titles,
+with the same `feed`, `from`, `to`, `sort`, `limit` and `offset` filters. A title matches when
+it is similar to `q` as a whole (`title % q`) or when one stretch of it is (`title %> q`, word
+similarity), so a single misspelled word in a long title is still found. Both conditions are
+served by the partial GIN index `articles_title_trgm_idx` (over articles that are not
+deleted). `rank` is then the larger of the two similarities (0–1), `sort=date` still orders
+by `published_at`, and `highlight` is empty. Paging past the last full-text hit (`offset` beyond the matches) returns
 an empty page, not fuzzy results.
 
-This catches misspellings ("djnago" → "django"). The cut-off is the
-`pg_trgm.similarity_threshold` setting (0.3 by default).
+This catches misspellings such as `kubernets` → "Kubernetes 1.31 released" or
+`postgress` → "PostgreSQL 17 beta". Swapped letters in a short word (`pyhton`) share too few
+trigrams and are not found, and titles are compared as stored, without `unaccent`. The
+cut-offs are the `pg_trgm.similarity_threshold` (0.3) and
+`pg_trgm.word_similarity_threshold` (0.6) settings.
 
 ## Adding a new language
 
