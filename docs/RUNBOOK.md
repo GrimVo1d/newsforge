@@ -113,5 +113,8 @@ FROM articles_article GROUP BY 1 ORDER BY 1 DESC LIMIT 12;
 2. Soft-deleted rows stay in the table. Remove them through the ORM, which also deletes their
    tags and delivery log rows (the foreign keys have no `ON DELETE CASCADE` in the database):
    `python manage.py shell -c "from apps.articles.models import Article; Article.objects.filter(is_deleted=True).delete()"`,
-   then `VACUUM ANALYZE articles_article;`.
+   then `VACUUM ANALYZE articles_article;`. Hard-delete only articles old enough to have
+   left their feeds: a soft-deleted row keeps the entry's dedup keys, but once the row is
+   gone, a feed that still lists the entry brings it back as a new article on the next
+   fetch, and subscriptions receive it again.
 3. For sustained volume, partition by `published_at` (see [DEPLOYMENT.md](DEPLOYMENT.md)).

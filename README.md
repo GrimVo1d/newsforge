@@ -20,7 +20,7 @@ delivered by signed webhook or email.
   per-article Russian / English / simple configuration, `websearch_to_tsquery` syntax,
   `ts_rank_cd` ranking, `ts_headline` snippets and a `pg_trgm` fallback for typos.
 - **Subscriptions** — a saved query with optional feed and tag filters, delivered instantly
-  or as a daily batch, by HMAC-SHA256-signed webhook or by email, with retries and a
+  or once a day, by HMAC-SHA256-signed webhook or by email, with retries and a
   per-delivery log.
 - **API** — DRF with JWT auth, OpenAPI schema and Swagger UI, throttling, a uniform error
   envelope `{"code": ..., "detail": ...}`.

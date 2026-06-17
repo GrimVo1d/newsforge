@@ -55,8 +55,10 @@ STRIDE applied to the crawler, the API and subscription delivery.
 - The webhook secret is returned only when issued (create, switch to webhook, rotate).
 - Crawl state of feeds (errors, statuses, schedule) is visible to staff only.
 - `/metrics` answers `404` unless a bearer token matches `METRICS_TOKEN`.
-- Rejected feed and webhook URLs get one generic message; the resolved private address (or a
-  failed lookup) is only logged, so the API cannot be used to map internal DNS.
+- A feed or webhook host that is private or does not resolve gets one generic message; the
+  resolved address (or the failed lookup) is only logged, so the API cannot be used to map
+  internal DNS. Other rejections (scheme, port, credentials in the URL) name the rule that
+  was broken, which says nothing about the network.
 - Articles of deleted feeds disappear from search, listings and subscription matching.
 - Production settings are the default of the image and of every server entry point (gunicorn,
   celery); only `manage.py` and compose pick dev. They have no default `SECRET_KEY` or

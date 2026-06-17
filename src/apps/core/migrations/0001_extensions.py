@@ -1,6 +1,7 @@
 """Install required PostgreSQL extensions before any FTS or trigram index is created.
 
-Runs early via run_before on feeds.0001 / articles.0001 / articles.0002.
+Runs early via run_before on articles.0001 (the tsvector trigger uses unaccent) and
+articles.0002 (the trigram index).
 """
 
 from __future__ import annotations

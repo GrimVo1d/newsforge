@@ -55,7 +55,9 @@ Access tokens live 15 minutes, refresh tokens 7 days; renew with
 (`THROTTLE_AUTH`, 10 requests per minute by default).
 
 In the examples below `$STAFF` and `$TOKEN` hold the access tokens of the staff account and
-of a regular user.
+of a regular user. Hosts under `example.internal` are placeholders: they do not resolve, so
+feed and webhook URLs built on them are rejected with `400` (`ssrf_blocked`). Put a real
+public feed or receiver in their place.
 
 ## 3. Add a feed (staff)
 
@@ -121,8 +123,9 @@ the tag.
 ## 6. Subscriptions
 
 A subscription is a saved query plus optional `feeds` and `tag_ids` filters. `interval` is
-`instant` (checked for every new article) or `daily` (a batch at 09:00 UTC covering
-articles since the previous run, at most 100). Each user can keep up to 20 subscriptions
+`instant` (checked for every new article) or `daily` (checked at 09:00 UTC against the
+articles added since the previous run, at most 100). Either way each matched article is a
+separate delivery: one email or one webhook call per article, there is no combined digest. Each user can keep up to 20 subscriptions
 (`MAX_SUBSCRIPTIONS_PER_USER`), and one email address or webhook URL can be used by at most 5
 other accounts (`MAX_ACCOUNTS_PER_TARGET`). The `feeds` and `tag_ids` filters must name
 existing feeds and tags; a `PUT` without them clears them, a `PATCH` keeps them.

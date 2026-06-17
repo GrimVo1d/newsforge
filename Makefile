@@ -1,5 +1,6 @@
 COMPOSE ?= docker compose
-DEV := $(COMPOSE) run --rm dev
+# --build: the tools image picks up dependency changes before every run.
+DEV := $(COMPOSE) run --rm --build dev
 
 .PHONY: help up down logs ps migrate superuser shell test cov lint fmt typecheck check pre-commit \
 	reindex-tsv dump-feeds db-reset
@@ -55,7 +56,5 @@ dump-feeds: ## dump feeds to initial_feeds.json (git-ignored)
 	$(COMPOSE) run --rm -T api python manage.py dumpdata feeds.feed --indent 2 > initial_feeds.json
 
 db-reset: ## drop the dev database volume and recreate it (DESTRUCTIVE)
-	$(COMPOSE) down
-	$(COMPOSE) rm -fsv db
-	docker volume rm newsforge_db_data || true
+	$(COMPOSE) down -v
 	$(COMPOSE) up -d db
