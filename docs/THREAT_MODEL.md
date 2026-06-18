@@ -38,8 +38,9 @@ STRIDE applied to the crawler, the API and subscription delivery.
   are stored as plain text; entries whose link is not `http(s)` are dropped.
 - **SQL injection** — every query is parameterized; text-search configuration names come from
   a whitelist; search parameters are validated (types, ranges, lengths).
-- **Search snippets** — `highlight` is built from tag-stripped text, so its only markup is
-  `<b>`; no remote images or links from feed HTML end up in it.
+- **Search snippets** — `highlight` is built from tag-stripped text and HTML-escaped as a
+  whole before the `<b>` marks are added, so its only markup is `<b>`; no remote images,
+  links or scripts from feed text end up in it.
 - **Shared data** — only staff can write feeds, tags and tag rules.
 - **Email header injection** — subjects are collapsed to one line; addresses are validated.
 

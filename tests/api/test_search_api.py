@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import timedelta
 
 import pytest
@@ -131,6 +132,36 @@ def test_highlight_marks_accented_words(api, make_article):
     )
     (hit,) = api.get(URL, {"q": "cafe", "lang": "en"}).json()["results"]
     assert "<b>cafe</b>" in hit["highlight"].lower()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "‹img src=x onerror=alert(1)›",  # unaccent turns these into "<" and ">"
+        "＜script＞alert(1)＜/script＞",
+        "«script»alert(1)«/script»",
+        "&#57344;img&#57345; &lt;img src=x&gt;",  # entities of the mark characters, escaped "<"
+    ],
+)
+def test_highlight_cannot_carry_markup(api, make_article, payload):
+    make_article(
+        "Breaking",
+        summary=f"<p>breaking news {payload} more breaking text here</p>",
+        language="english",
+    )
+    (hit,) = api.get(URL, {"q": "breaking", "lang": "en"}).json()["results"]
+    assert "<b>breaking</b>" in hit["highlight"].lower()
+    assert re.sub(r"</?b>", "", hit["highlight"]).count("<") == 0, hit["highlight"]
+
+
+def test_highlight_of_a_tag_cut_at_the_prefix_limit(api, make_article):
+    make_article(
+        "Cut",
+        summary="<p>" + "breaking " * 221 + '<img src="https://t.example.internal/p.gif"></p>',
+        language="english",
+    )
+    (hit,) = api.get(URL, {"q": "breaking", "lang": "en"}).json()["results"]
+    assert re.sub(r"</?b>", "", hit["highlight"]).count("<") == 0
 
 
 def test_rank_is_normalized(api, articles):

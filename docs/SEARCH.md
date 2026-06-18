@@ -65,16 +65,18 @@ The `simple` config does no stemming and no stop-word removal — it is the fall
 Parameters used:
 
 ```
-MaxFragments=2, MinWords=5, MaxWords=20, StartSel=<b>, StopSel=</b>
+MaxFragments=2, MinWords=5, MaxWords=20, StartSel=U+E000, StopSel=U+E001
 ```
 
 `MaxFragments=2` keeps the response payload bounded. Highlighting is the most expensive
 operator in the query, so `search_rank.sql` computes it in an outer query over the already
-limited page. Its input is the summary with all tags removed (cut to 2000 characters), so the
-snippet is plain text, HTML-escaped (`&amp;`, `&lt;`), whose only markup is the `<b>` marks.
-It is safe to render as HTML. Like the index, the input goes through `unaccent`, so `café`
-is marked for the query `cafe`; the snippet is therefore shown without diacritics
-(`café` → `cafe`, `ё` → `е`).
+limited page. Its input is the first 2000 characters of the summary, put through `unaccent`
+(like the index, so `café` is marked for the query `cafe`; the snippet is therefore shown
+without diacritics: `café` → `cafe`, `ё` → `е`) and then stripped of tags. Matches are marked
+with two private-use characters, not with `<b>`: `apps.search.queries.render_highlight`
+HTML-escapes the whole snippet (`&amp;`, `&lt;`) and only then turns the marks into `<b>` and
+`</b>`. Nothing in the text can become markup this way, including characters that `unaccent`
+maps to `<` (`‹`, `＜`, `«`), so the snippet is safe to render as HTML.
 
 ## Fuzzy fallback (`pg_trgm`)
 

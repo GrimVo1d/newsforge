@@ -22,13 +22,15 @@ SELECT
   h.id, h.title, h.summary, h.url, h.feed_id, h.published_at, h.language, h.rank,
   ts_headline(
     %(cfg)s::regconfig,
-    -- plain text in, so the result holds no markup except the <b> marks; unaccented like
-    -- the index, or "café" in the text would not be marked for the query "cafe"
-    unaccent(left(
-      replace(regexp_replace(coalesce(h.summary, ''), '<[^>]*>', ' ', 'g'), '<', '&lt;'), 2000
-    )),
+    -- Unaccented like the index (or "café" would not be marked for "cafe"), then stripped of
+    -- tags and of the mark characters. unaccent can produce "<" (from "‹", "＜", "«"), so it
+    -- runs first; the result is HTML-escaped in Python (queries.render_highlight) anyway.
+    regexp_replace(
+      translate(unaccent(left(coalesce(h.summary, ''), 2000)), %(marks)s, ''),
+      '<[^>]*>', ' ', 'g'
+    ),
     q.tsq,
-    'MaxFragments=2, MinWords=5, MaxWords=20, StartSel=<b>, StopSel=</b>'
+    %(headline_options)s
   ) AS highlight
 FROM hits h, q
 ORDER BY h.rank DESC, h.published_at DESC NULLS LAST, h.id DESC;
