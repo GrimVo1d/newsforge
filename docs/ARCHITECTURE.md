@@ -83,7 +83,8 @@ so a backlog of workers does not pile up duplicates of the same feed.
 1. **robots.txt** — `robots.is_allowed` fetches `/robots.txt` through the safe client
    (at most 500 KB, truncated beyond that) and evaluates it per RFC 9309: the groups for the
    product token of `USER_AGENT` (`newsforge`), else the `*` groups; the longest matching rule
-   wins, `Allow` on a tie; `*` and `$` patterns. A `4xx` means "allowed" and is cached for
+   wins, `Allow` on a tie; `*` and `$` patterns, matched without regular expressions (the
+   file comes from the feed host) and capped at 2000 rules. A `4xx` means "allowed" and is cached for
    24 h; a `5xx` or network error means "disallowed" for 30 minutes; a host that is not
    public is "allowed" here (30 minutes), so the fetch itself reports `ssrf_blocked`. A
    blocked feed is not paused: it is checked again every interval against the cached copy.

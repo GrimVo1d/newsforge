@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from urllib.parse import quote, unquote, urlsplit
 
 import httpx
@@ -61,11 +62,36 @@ def product_token(user_agent: str | None = None) -> str:
     return (token.group(0) if token else "").lower()
 
 
+MAX_RULES = 2_000  # per robots.txt; more is not a policy, it is an attack on the parser
+MAX_PATTERN_CHARS = 2_048
+
+
 @dataclass(frozen=True, slots=True)
 class _Rule:
     allow: bool
     pattern: str
-    regex: re.Pattern[str]
+    parts: tuple[str, ...]  # the pattern split on "*"
+    anchored: bool  # ended with "$"
+
+    def matches(self, path: str) -> bool:
+        """Wildcard match in linear passes (no backtracking regex: patterns come from the host).
+
+        The first part must be a prefix of the path, every next part is found left to right
+        after the previous one; with "$" the last part must end the path.
+        """
+        first, *rest = self.parts
+        if not path.startswith(first):
+            return False
+        if not rest:
+            return not self.anchored or path == first
+        pos = len(first)
+        last = rest.pop() if self.anchored else None
+        for part in rest:
+            found = path.find(part, pos)
+            if found < 0:
+                return False
+            pos = found + len(part)
+        return last is None or (path.endswith(last) and len(path) - len(last) >= pos)
 
 
 def _normalize_path(path: str) -> str:
@@ -73,18 +99,27 @@ def _normalize_path(path: str) -> str:
     return quote(unquote(path), safe="/?=&;:@!$'()*+,~-._%")
 
 
-def _compile(pattern: str) -> re.Pattern[str]:
+def _rule(allow: bool, pattern: str) -> _Rule:
     anchored = pattern.endswith("$")
-    body = pattern[:-1] if anchored else pattern
-    regex = ".*".join(re.escape(part) for part in _normalize_path(body).split("*"))
-    return re.compile(regex + ("$" if anchored else ""))
+    body = _normalize_path(pattern[:-1] if anchored else pattern)
+    return _Rule(allow, pattern, tuple(body.split("*")), anchored)
 
 
-def _rules_for(body: str, token: str) -> list[_Rule]:
+def _agent_token(value: str) -> str:
+    """``User-agent: newsforge/0.1`` names the product token ``newsforge``."""
+    if value.strip() == "*":
+        return "*"
+    match = re.match(r"[A-Za-z_-]*", value.strip())
+    return (match.group(0) if match else "").lower()
+
+
+@lru_cache(maxsize=32)  # bodies are up to 500 KiB each
+def _rules_for(body: str, token: str) -> tuple[_Rule, ...]:
     """Rules of all groups that name ``token``, else of the ``*`` groups (RFC 9309 2.2.1)."""
     groups: dict[str, list[_Rule]] = {}
     agents: list[str] = []
     in_rules = False
+    count = 0
     for raw in body.splitlines():
         line = raw.split("#", 1)[0].strip()
         if ":" not in line:
@@ -94,15 +129,19 @@ def _rules_for(body: str, token: str) -> list[_Rule]:
         if key == "user-agent":
             if in_rules:
                 agents, in_rules = [], False
-            agents.append(value.lower())
+            agents.append(_agent_token(value))
+            groups.setdefault(agents[-1], [])  # a group exists even if all its rules are empty
         elif key in ("allow", "disallow") and agents:
             in_rules = True
-            if not value:
+            if not value or len(value) > MAX_PATTERN_CHARS or count >= MAX_RULES:
                 continue  # an empty rule matches nothing
-            rule = _Rule(key == "allow", value, _compile(value))
+            count += 1
+            rule = _rule(key == "allow", value)
             for agent in agents:
-                groups.setdefault(agent, []).append(rule)
-    return groups.get(token) or groups.get("*") or []
+                groups[agent].append(rule)
+    if token and token in groups:
+        return tuple(groups[token])
+    return tuple(groups.get("*", ()))
 
 
 def can_fetch(body: str, url: str, token: str) -> bool:
@@ -113,7 +152,7 @@ def can_fetch(body: str, url: str, token: str) -> bool:
         return True
     best: _Rule | None = None
     for rule in _rules_for(body, token):
-        if not rule.regex.match(path):
+        if not rule.matches(path):
             continue
         if (
             best is None

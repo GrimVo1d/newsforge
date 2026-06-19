@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import socket
+import time
 from datetime import timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -312,6 +313,13 @@ def test_robots_uses_the_configured_product_token(public_dns, settings):
         ("Disallow:", "/feed.xml", True),  # empty rule matches nothing
         ("Disallow: /%7Euser/", "/~user/feed", False),  # percent-encoding is normalized
         ("Disallow: /", "/robots.txt", True),
+        ("Disallow: /a*b*c", "/a-x-b-y-c-z", False),  # wildcards in order
+        ("Disallow: /a*b*c", "/a-x-c-y-b", True),  # ... and only in that order
+        ("Disallow: /a*c*b$", "/a-x-c-y-b", False),
+        ("Disallow: /a*c*b$", "/a-x-c-y-b-z", True),
+        ("Disallow: /$", "/", False),
+        ("Disallow: /$", "/feed.xml", True),
+        ("Disallow: *", "/feed.xml", False),
     ],
 )
 def test_robots_rule_matching(rules, path, allowed):
@@ -329,6 +337,25 @@ def test_robots_groups_for_one_agent_are_merged():
     assert not robots.can_fetch(body, "https://example.internal/b", "newsforge")
     assert robots.can_fetch(body, "https://example.internal/c", "newsforge")
     assert not robots.can_fetch(body, "https://example.internal/c", "otherbot")
+
+
+def test_robots_explicit_allow_group_is_not_ignored():
+    # The group for our token exists although its only rule is empty: "*" does not apply.
+    body = "User-agent: newsforge/0.1\nDisallow:\n\nUser-agent: *\nDisallow: /\n"
+    assert robots.can_fetch(body, "https://example.internal/feed.xml", "newsforge")
+    assert not robots.can_fetch(body, "https://example.internal/feed.xml", "otherbot")
+
+
+def test_robots_matching_is_linear_for_hostile_patterns():
+    body = "User-agent: *\n" + "Disallow: /" + "*a" * 40 + "*b\n"
+    started = time.monotonic()
+    assert robots.can_fetch(body, "https://example.internal/" + "a" * 2000, "newsforge")
+    assert time.monotonic() - started < 1
+
+
+def test_robots_rules_are_capped():
+    body = "User-agent: *\n" + "Allow: /x\n" * robots.MAX_RULES + "Disallow: /\n"
+    assert robots.can_fetch(body, "https://example.internal/feed.xml", "newsforge")
 
 
 def test_relative_links_and_http_charset(feed, allow_robots):
