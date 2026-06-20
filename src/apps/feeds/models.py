@@ -21,6 +21,9 @@ class FeedStatus(models.TextChoices):
     TOO_LARGE = "too_large", "too_large"
 
 
+MAX_URL_CHARS = 2048
+
+
 class Feed(models.Model):
     url = models.TextField(unique=True)
     site_url = models.TextField(blank=True, default="")

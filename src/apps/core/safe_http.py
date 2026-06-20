@@ -20,9 +20,10 @@ import socket
 import time
 import zlib
 from dataclasses import dataclass
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import httpx
+import idna
 
 IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 
@@ -109,6 +110,41 @@ def _is_public(ip: IPAddress) -> bool:
     return ip.is_global and not ip.is_multicast
 
 
+def ascii_host(host: str) -> str:
+    """The host in lowercase ASCII: ``Bücher.example.`` → ``xn--bcher-kva.example``.
+
+    Internationalized names are sent as A-labels (IDNA / UTS 46) in DNS, ``Host`` and SNI.
+    """
+    host = host.rstrip(".").lower()
+    if not host:
+        raise UnsafeURLError("missing host")
+    if host.isascii():
+        return host
+    try:
+        return idna.encode(host, uts46=True).decode("ascii")
+    except idna.IDNAError as exc:
+        raise UnsafeURLError("invalid host name") from exc
+
+
+def canonical_url(url: str) -> str:
+    """One spelling per URL: lowercase scheme and ASCII host, no default port or fragment.
+
+    The path and query are kept as they are: servers may treat their case or order as
+    significant.
+    """
+    try:
+        parts = urlsplit(url.strip())
+        port = parts.port
+    except ValueError as exc:
+        raise UnsafeURLError(f"malformed url: {exc}") from exc
+    scheme = parts.scheme.lower()
+    host = ascii_host(parts.hostname or "")
+    netloc = f"[{host}]" if ":" in host else host
+    if port is not None and port != ALLOWED_PORTS.get(scheme):
+        netloc = f"{netloc}:{port}"
+    return urlunsplit((scheme, netloc, parts.path or "/", parts.query, ""))
+
+
 def resolve(url: str, *, allow_http: bool = False) -> Target:
     """Check a URL and resolve its host; raise UnsafeURLError when it is not public."""
     try:
@@ -127,9 +163,7 @@ def resolve(url: str, *, allow_http: bool = False) -> Target:
         raise UnsafeURLError(f"port not allowed: {port}")
     if parts.username or parts.password:
         raise UnsafeURLError("credentials in url are not allowed")
-    host = (parts.hostname or "").rstrip(".")
-    if not host:
-        raise UnsafeURLError("missing host")
+    host = ascii_host(parts.hostname or "")
 
     try:
         infos = socket.getaddrinfo(host, default_port, type=socket.SOCK_STREAM)

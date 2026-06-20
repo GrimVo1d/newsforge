@@ -6,7 +6,8 @@ from django.conf import settings
 from django.db import IntegrityError, transaction
 from rest_framework import serializers
 
-from apps.feeds.models import Feed
+from apps.core.safe_http import canonical_url
+from apps.feeds.models import MAX_URL_CHARS, Feed
 from apps.feeds.validators import SSRFError, assert_public_url
 
 DUPLICATE_URL = "a feed with this url already exists"
@@ -16,7 +17,7 @@ class FeedSerializer(serializers.ModelSerializer[Feed]):
     """Full view for staff, including crawl state."""
 
     # Uniqueness is checked against live feeds only: a deleted feed's URL can be added again.
-    url = serializers.CharField(max_length=2048)
+    url = serializers.CharField(max_length=MAX_URL_CHARS)
 
     class Meta:
         model = Feed
@@ -60,6 +61,8 @@ class FeedSerializer(serializers.ModelSerializer[Feed]):
             assert_public_url(value)
         except SSRFError as exc:
             raise serializers.ValidationError(str(exc), code="ssrf_blocked") from exc
+        # Stored in one spelling, so "https://WWW.Example.org:443/rss#x" is a duplicate too.
+        value = canonical_url(value)
         live = Feed.objects.filter(url=value, is_deleted=False)
         if self.instance is not None:
             live = live.exclude(pk=self.instance.pk)

@@ -132,6 +132,35 @@ def test_permanent_redirect_to_another_feed_keeps_the_url(feed, allow_robots):
     assert feed.url == "https://example.internal/feed.xml"
 
 
+def test_permanent_redirect_target_is_stored_canonical(feed, allow_robots):
+    result = FetchResult(
+        "not_modified", 304, None, None, None, permanent_url="https://NEW.example.internal:443/f#x"
+    )
+    with _fetch_returns(result):
+        fetch_feed(feed.id)
+    feed.refresh_from_db()
+    assert feed.url == "https://new.example.internal/f"
+
+
+def test_permanent_redirect_to_an_overlong_url_is_ignored(feed, allow_robots):
+    long_url = "https://new.example.internal/" + "a" * 2048
+    result = FetchResult("not_modified", 304, None, None, None, permanent_url=long_url)
+    with _fetch_returns(result):
+        assert fetch_feed(feed.id) == {"status": FeedStatus.NOT_MODIFIED}
+    feed.refresh_from_db()
+    assert feed.url == "https://example.internal/feed.xml"
+
+
+def test_concurrent_move_to_the_same_url_keeps_the_feed_where_it_was(feed):
+    from tasks.fetcher import _save
+
+    other = Feed.objects.create(url="https://new.example.internal/feed.xml")
+    feed.url, feed.last_status = other.url, FeedStatus.OK
+    _save(feed, ["url", "last_status", "updated_at"])
+    feed.refresh_from_db()
+    assert (feed.url, feed.last_status) == ("https://example.internal/feed.xml", FeedStatus.OK)
+
+
 def test_entry_dates_are_robust():
     import feedparser
 

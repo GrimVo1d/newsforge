@@ -70,6 +70,9 @@ curl -s -X POST $API/feeds/ -H "Authorization: Bearer $STAFF" \
 - The URL must be `https://` on the default port and resolve to public addresses only;
   otherwise the request fails with `400`. Plain `http://` is accepted only with
   `ALLOW_PLAIN_HTTP=true`.
+- The URL is stored in one canonical spelling: lowercase scheme and host (an internationalized
+  host in its `xn--` form), no default port, no `#fragment`. Another spelling of an existing
+  feed's URL is rejected as a duplicate.
 - `interval_seconds` is the polling interval, at least 300 (default 1800).
 - A new feed is due immediately; Beat picks it up within a minute. To fetch an existing feed
   right away: `POST $API/feeds/{id}/refresh/`.

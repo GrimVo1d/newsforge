@@ -85,6 +85,17 @@ def test_live_feed_url_must_be_unique(staff_api, feed):
     assert resp.status_code == 400
 
 
+def test_feed_urls_are_stored_canonical(staff_api, feed):
+    resp = staff_api.post(
+        "/api/v1/feeds/", {"url": "https://Blog.Example.Internal:443/rss#latest"}, format="json"
+    )
+    assert resp.status_code == 201, resp.json()
+    assert resp.json()["url"] == "https://blog.example.internal/rss"
+    # Another spelling of an existing feed is a duplicate.
+    variant = {"url": "https://EXAMPLE.internal./feed.xml#x"}
+    assert staff_api.post("/api/v1/feeds/", variant, format="json").status_code == 400
+
+
 def test_changing_the_url_resets_crawl_state(staff_api, feed):
     feed.etag, feed.last_modified, feed.consecutive_errors = '"v1"', "yesterday", 6
     feed.disabled_until = timezone.now() + timedelta(hours=3)

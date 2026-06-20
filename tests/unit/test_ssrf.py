@@ -143,6 +143,39 @@ def test_request_is_pinned_to_checked_address():
     assert req.extensions["sni_hostname"] == "feeds.example.internal"
 
 
+def test_idn_host_is_sent_as_an_a_label():
+    transport, seen = _transport(lambda r: httpx.Response(200, content=b"ok"))
+    with _resolves_to(PUBLIC) as dns:
+        safe_http.request("GET", "https://Bücher.example.internal/rss", transport=transport)
+    assert dns.call_args.args[0] == "xn--bcher-kva.example.internal"
+    (req,) = seen
+    assert req.headers["host"] == "xn--bcher-kva.example.internal"
+    assert req.extensions["sni_hostname"] == "xn--bcher-kva.example.internal"
+
+
+def test_invalid_idn_host_is_unsafe():
+    with pytest.raises(UnsafeURLError):
+        safe_http.resolve("https://☃..example.internal/rss")
+
+
+@pytest.mark.parametrize(
+    "url, canonical",
+    [
+        (
+            "HTTPS://WWW.Example.Internal:443/rss?b=2&a=1#top",
+            "https://www.example.internal/rss?b=2&a=1",
+        ),
+        ("https://example.internal", "https://example.internal/"),
+        ("https://Bücher.Example.Internal./Feed", "https://xn--bcher-kva.example.internal/Feed"),
+        ("http://example.internal:80/a", "http://example.internal/a"),
+        ("https://example.internal:8443/a", "https://example.internal:8443/a"),
+        ("https://[2001:DB8::1]:443/a", "https://[2001:db8::1]/a"),
+    ],
+)
+def test_canonical_url(url, canonical):
+    assert safe_http.canonical_url(url) == canonical
+
+
 def test_redirect_targets_are_checked_on_every_hop():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(302, headers={"location": "https://internal.example.internal/"})

@@ -25,6 +25,7 @@ dependencies = [
     # "sni_hostname" request extension: re-verify that before raising these bounds.
     "httpx>=0.27,<0.29",
     "httpcore>=1.0,<2",
+    "idna>=3.7",  # A-labels for internationalized host names (safe_http.ascii_host)
     "bleach>=6.1",
     "langdetect>=1.0.9",
     "prometheus-client>=0.20",

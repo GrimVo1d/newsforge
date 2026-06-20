@@ -10,12 +10,14 @@ from urllib.parse import urljoin
 import feedparser
 from celery import shared_task
 from django.conf import settings
+from django.db import IntegrityError, transaction
 from django.utils import timezone as djtz
 
 from apps.articles.normalizer import plain_text
+from apps.core.safe_http import UnsafeURLError, canonical_url
 from apps.feeds.backoff import disabled_until, next_attempt_at, should_disable
 from apps.feeds.fetcher import FetchResult, fetch
-from apps.feeds.models import Feed, FeedStatus
+from apps.feeds.models import MAX_URL_CHARS, Feed, FeedStatus
 from apps.feeds.ratelimit import try_acquire
 from apps.feeds.robots import is_allowed
 
@@ -58,11 +60,32 @@ def _record_failure(feed: Feed, status: str) -> dict[str, Any]:
 
 def _follow_permanent_redirect(feed: Feed, result: FetchResult) -> list[str]:
     """Move the feed to the target of a permanent redirect, unless another feed has it."""
-    new_url = result.permanent_url
-    if not new_url or new_url == feed.url or Feed.objects.filter(url=new_url).exists():
+    if not result.permanent_url:
+        return []
+    try:
+        new_url = canonical_url(result.permanent_url)
+    except UnsafeURLError:
+        return []
+    if (
+        new_url == feed.url
+        or len(new_url) > MAX_URL_CHARS
+        or Feed.objects.filter(url=new_url).exists()
+    ):
         return []
     feed.url = new_url
     return ["url"]
+
+
+def _save(feed: Feed, fields: list[str]) -> None:
+    try:
+        with transaction.atomic():
+            feed.save(update_fields=fields)
+    except IntegrityError:
+        if "url" not in fields:
+            raise
+        # Another feed moved to the same URL concurrently: this one stays where it was.
+        feed.url = Feed.objects.values_list("url", flat=True).get(pk=feed.pk)
+        feed.save(update_fields=[name for name in fields if name != "url"])
 
 
 @shared_task(name="tasks.fetcher.fetch_feed", acks_late=True)
@@ -92,15 +115,16 @@ def fetch_feed(feed_id: int) -> dict[str, Any]:
         feed.last_status = FeedStatus.NOT_MODIFIED
         feed.consecutive_errors = 0
         feed.disabled_until = None
-        feed.save(
-            update_fields=[
+        _save(
+            feed,
+            [
                 *moved,
                 "last_status",
                 "last_fetched_at",
                 "consecutive_errors",
                 "disabled_until",
                 "updated_at",
-            ]
+            ],
         )
         return {"status": FeedStatus.NOT_MODIFIED}
 
@@ -143,14 +167,15 @@ def fetch_feed(feed_id: int) -> dict[str, Any]:
     feed.title = plain_text(meta.get("title"), 500) or feed.title
     site_url = str(meta.get("link") or "")
     if site_url.startswith(("https://", "http://")):
-        feed.site_url = site_url[:2048]
+        feed.site_url = site_url[:MAX_URL_CHARS]
     feed.etag = result.etag or feed.etag
     feed.last_modified = result.last_modified or feed.last_modified
     feed.last_status = FeedStatus.OK
     feed.consecutive_errors = 0
     feed.disabled_until = None
-    feed.save(
-        update_fields=[
+    _save(
+        feed,
+        [
             *moved,
             "title",
             "site_url",
@@ -161,6 +186,6 @@ def fetch_feed(feed_id: int) -> dict[str, Any]:
             "consecutive_errors",
             "disabled_until",
             "updated_at",
-        ]
+        ],
     )
     return {"status": FeedStatus.OK, "entries": min(len(entries), settings.MAX_ENTRIES_PER_FETCH)}

@@ -93,8 +93,8 @@ so a backlog of workers does not pile up duplicates of the same feed.
    after 1–2 × `PER_DOMAIN_MIN_INTERVAL`.
 3. **Conditional GET** — `If-None-Match` / `If-Modified-Since` from the stored validators.
    `304` → `not_modified`; other statuses ≥ 300 (after redirects) → `http_error`. When every
-   redirect on the way was permanent (`301` / `308`), the feed's URL moves to the target,
-   unless another feed already has it.
+   redirect on the way was permanent (`301` / `308`), the feed's URL moves to the target
+   (in canonical form, at most 2048 characters), unless another feed already has it.
 4. **Parsing** — `feedparser`; a UTF-8 BOM is stripped first. A malformed document with no
    entries → `parse_error`. On success the feed's title, site URL and validators are saved.
 5. **Failures** — `consecutive_errors` grows, `next_fetch_at` is pushed out by
@@ -106,7 +106,8 @@ so a backlog of workers does not pile up duplicates of the same feed.
 
 Feeds, robots.txt and webhooks all go through `safe_http.request`, which on every hop:
 checks scheme (`https`, or `http` with `ALLOW_PLAIN_HTTP`), default port, no credentials in
-the URL; resolves the host once and requires every address to be globally routable; then
+the URL; turns an internationalized host name into its ASCII form (`xn--…`, used for DNS,
+`Host` and SNI); resolves the host once and requires every address to be globally routable; then
 connects to that exact address while sending the original `Host` header and TLS SNI, so
 certificate verification still uses the hostname. Redirects are followed manually (up to 5,
 none for webhooks) and each target goes through the same checks. An overall deadline covers
