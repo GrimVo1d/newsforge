@@ -140,7 +140,7 @@ MAX_RESPONSE_BYTES = env.int("MAX_RESPONSE_BYTES", default=5_242_880)
 MAX_ENTRIES_PER_FETCH = env.int("MAX_ENTRIES_PER_FETCH", default=200)
 MIN_FEED_INTERVAL_SECONDS = 300
 MAX_SUBSCRIPTIONS_PER_USER = env.int("MAX_SUBSCRIPTIONS_PER_USER", default=20)
-# How many other accounts may already deliver to one email address or webhook URL.
+# How many accounts may deliver to one email address or webhook URL.
 MAX_ACCOUNTS_PER_TARGET = env.int("MAX_ACCOUNTS_PER_TARGET", default=5)
 # Allow plain-http feed / webhook URLs (https only by default).
 ALLOW_PLAIN_HTTP = env.bool("ALLOW_PLAIN_HTTP", default=False)

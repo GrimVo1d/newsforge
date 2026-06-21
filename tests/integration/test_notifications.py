@@ -109,7 +109,37 @@ def test_network_errors_are_logged_and_retried(hook, article, receiver):
     receiver.exc = httpx.ConnectError("refused")
     with pytest.raises(httpx.ConnectError):
         deliver(hook.id, article.id)
-    assert "refused" in DeliveryLog.objects.get(subscription=hook).error
+    assert DeliveryLog.objects.get(subscription=hook).error == "connection failed"
+
+
+@pytest.mark.parametrize(
+    ("exc", "category"),
+    [
+        (httpx.ReadTimeout("slow"), "timeout"),
+        (safe_http.DeadlineExceededError("https://hooks.example.internal/nf"), "timeout"),
+        (RetryableDeliveryError(503), "receiver answered 503"),
+        (ConnectionResetError("reset by 10.0.0.7"), "connection failed"),
+        (ValueError("secret detail"), "internal error"),
+    ],
+)
+def test_failed_attempts_are_logged_as_a_category(hook, article, receiver, exc, category):
+    receiver.exc = exc
+    with pytest.raises(type(exc)):
+        deliver(hook.id, article.id)
+    assert DeliveryLog.objects.get(subscription=hook).error == category
+
+
+def test_instant_delivery_sets_last_notified_at(hook, article, receiver):
+    deliver(hook.id, article.id)
+    hook.refresh_from_db()
+    assert hook.last_notified_at is not None
+
+
+def test_failed_delivery_keeps_last_notified_at(hook, article, receiver):
+    receiver.status = 410
+    deliver(hook.id, article.id)
+    hook.refresh_from_db()
+    assert hook.last_notified_at is None
 
 
 def test_blocked_webhook_is_not_retried(hook, article, receiver):
@@ -267,7 +297,9 @@ def test_permanent_smtp_rejections_are_final(user, article, monkeypatch, exc, fi
     else:
         with pytest.raises(type(exc)):
             deliver(sub.id, article.id)
-        assert DeliveryLog.objects.get(subscription=sub).leased_until is None
+        log = DeliveryLog.objects.get(subscription=sub)
+        assert log.leased_until is None
+        assert log.error == "mail server unavailable"  # never the server's own text
 
 
 def test_email_log_holds_the_smtp_code(user, article):

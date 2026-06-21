@@ -217,6 +217,67 @@ def test_accounts_per_target_are_capped(db, settings):
     assert switched.status_code == 400
 
 
+@pytest.mark.parametrize(
+    ("delivery", "first", "variant"),
+    [
+        ("email", "victim@example.internal", "Victim+news@EXAMPLE.internal"),
+        ("email", "first.last@gmail.com", "FirstLast+x@googlemail.com"),
+        ("webhook", HOOK, HOOK.replace("hooks.example", "HOOKS.Example") + "/?a=1#x"),
+    ],
+)
+def test_target_spelling_variants_count_as_one(db, settings, delivery, first, variant):
+    from django.contrib.auth import get_user_model
+    from rest_framework.test import APIClient
+
+    settings.MAX_ACCOUNTS_PER_TARGET = 1
+    field = "email_to" if delivery == "email" else "webhook_url"
+    body = {"name": "m", "q": "x", "delivery": delivery}
+    codes = []
+    for n, target in enumerate([first, variant]):
+        client = APIClient()
+        client.force_authenticate(get_user_model().objects.create_user(username=f"v{n}"))
+        codes.append(client.post(URL, {**body, field: target}, format="json").status_code)
+    assert codes == [201, 400]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_accounts_per_target_cap_holds_under_concurrency(settings, monkeypatch):
+    import threading
+    import time
+
+    from django.contrib.auth import get_user_model
+    from django.db import connection
+    from django.db.models import QuerySet
+    from rest_framework.test import APIClient
+
+    settings.MAX_ACCOUNTS_PER_TARGET = 1
+    real_count = QuerySet.count
+
+    def slow_count(self):
+        n = real_count(self)
+        if self.model is Subscription:
+            time.sleep(0.3)  # widen the check-then-insert window
+        return n
+
+    monkeypatch.setattr(QuerySet, "count", slow_count)
+    users = [get_user_model().objects.create_user(username=f"c{n}") for n in range(2)]
+    body = {"name": "m", "q": "x", "delivery": "email", "email_to": "victim@example.internal"}
+    codes: list[int] = []
+
+    def worker(owner):
+        client = APIClient()
+        client.force_authenticate(owner)
+        codes.append(client.post(URL, body, format="json").status_code)
+        connection.close()
+
+    threads = [threading.Thread(target=worker, args=(u,)) for u in users]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sorted(codes) == [201, 400]
+
+
 @pytest.mark.django_db(transaction=True)
 def test_subscription_cap_holds_under_concurrency(user, settings, monkeypatch):
     import threading

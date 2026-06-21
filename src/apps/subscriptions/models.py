@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import secrets
+from typing import Any
 
 from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.db import models
+
+from apps.subscriptions.targets import target_key
 
 WEBHOOK_SECRET_BYTES = 32
 
@@ -35,6 +38,8 @@ class Subscription(models.Model):
     delivery = models.CharField(max_length=16, choices=Delivery.choices)
     webhook_url = models.TextField(null=True, blank=True)
     email_to = models.TextField(null=True, blank=True)
+    # The target in one spelling (apps.subscriptions.targets), kept in sync by save().
+    target_key = models.TextField(blank=True, default="", db_index=True)
     # HMAC key for webhook signatures. Stored as plaintext because signing needs it; it is
     # shown to the owner once (on create / rotate) and never serialized afterwards.
     webhook_secret = models.CharField(max_length=255, null=True, blank=True)
@@ -48,6 +53,16 @@ class Subscription(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+    def target(self) -> str | None:
+        return self.email_to if self.delivery == self.Delivery.EMAIL else self.webhook_url
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self.target_key = target_key(self.delivery, self.target())
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None and "target_key" not in update_fields:
+            kwargs["update_fields"] = [*update_fields, "target_key"]
+        super().save(*args, **kwargs)
 
 
 class DeliveryLog(models.Model):

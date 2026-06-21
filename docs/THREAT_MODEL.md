@@ -82,8 +82,13 @@ STRIDE applied to the crawler, the API and subscription delivery.
 - **Subscription abuse** — at most `MAX_SUBSCRIPTIONS_PER_USER` (20) subscriptions per user,
   checked under a lock on the user, which bounds the matching work per article and the mail /
   webhook volume per account; one email address or webhook URL can be the target of at most
-  `MAX_ACCOUNTS_PER_TARGET` (5) other accounts, and new accounts per address are capped per
-  day, so many accounts cannot be pointed at one victim.
+  `MAX_ACCOUNTS_PER_TARGET` (5) accounts, counted on a normalized key (email case, `+tags`,
+  Gmail dots; webhook host case, query, fragment, trailing slash) under a transaction lock on
+  that key, and new accounts per address are capped per day, so many accounts cannot be
+  pointed at one victim.
+- **Delivery log disclosure** — the log a user reads stores a failure category, never the
+  text of an SMTP or HTTP error, so it does not reveal mail server internals; details go to
+  the worker log.
 
 ### Elevation of privilege
 
@@ -101,7 +106,7 @@ STRIDE applied to the crawler, the API and subscription delivery.
   limits how fast this can be probed.
 - **No email confirmation.** A user can subscribe any address or webhook URL. Mails and
   webhooks go there only for queries the user chose, at most once per matching article and
-  subscription, and identify the service. The per-target cap counts exact webhook URLs, not
+  subscription, and identify the service. The per-target cap counts webhook endpoints (host and path), not
   hosts (shared webhook services such as chat integrations put every customer on one host),
   so one host can still receive several URLs' worth of deliveries.
 - **Plaintext webhook secrets in the database.** Needed for HMAC; database access already

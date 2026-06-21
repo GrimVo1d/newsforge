@@ -77,7 +77,7 @@ all clients behind the proxy share one bucket.
 | Variable | Default | Notes |
 |---|---|---|
 | `MAX_SUBSCRIPTIONS_PER_USER` | `20` | creating one more answers `400` |
-| `MAX_ACCOUNTS_PER_TARGET` | `5` | other accounts that may already deliver to the same email address or webhook URL; one more answers `400` |
+| `MAX_ACCOUNTS_PER_TARGET` | `5` | accounts that may deliver to the same email address or webhook URL (spelling variants count once); one more answers `400` |
 
 ### Crawler
 

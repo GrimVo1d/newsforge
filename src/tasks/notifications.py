@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import smtplib
 import time
 from datetime import timedelta
@@ -21,6 +22,8 @@ from django.utils import timezone
 from apps.articles.models import Article
 from apps.core import safe_http
 from apps.subscriptions.models import DeliveryLog, Subscription
+
+logger = logging.getLogger(__name__)
 
 MAX_SUBJECT_CHARS = 200
 MAX_ERROR_CHARS = 1000
@@ -102,6 +105,24 @@ def _record(
     DeliveryLog.objects.filter(
         subscription_id=subscription_id, article_id=article_id, succeeded=False
     ).update(**values, attempts=F("attempts") + 1, delivered_at=timezone.now())
+
+
+def _failure(exc: Exception) -> str:
+    """Name a failed attempt for the delivery log without the receiver's or mail server's text.
+
+    The log is visible to the subscription owner, so it gets a category; details go to our logs.
+    """
+    if isinstance(exc, RetryableDeliveryError):
+        return str(exc)
+    if isinstance(exc, (httpx.TimeoutException, safe_http.DeadlineExceededError, TimeoutError)):
+        return "timeout"
+    if isinstance(exc, httpx.HTTPError):
+        return "connection failed"
+    if isinstance(exc, smtplib.SMTPException):
+        return "mail server unavailable"
+    if isinstance(exc, OSError):
+        return "connection failed"
+    return "internal error"
 
 
 def _send_webhook(sub: Subscription, body: bytes, idempotency_key: str) -> int:
@@ -195,7 +216,8 @@ def deliver(subscription_id: int, article_id: int) -> dict[str, Any]:
     except Exception as exc:
         # Log the failed attempt, then let autoretry_for decide whether to try again.
         status_code = exc.status_code if isinstance(exc, RetryableDeliveryError) else None
-        _record(sub.id, article.id, succeeded=False, http_status=status_code, error=repr(exc))
+        logger.warning("delivery %s/%s failed: %r", subscription_id, article_id, exc)
+        _record(sub.id, article.id, succeeded=False, http_status=status_code, error=_failure(exc))
         raise
 
     # Redirects are not followed, so a 3xx answer means the payload did not arrive.
@@ -207,6 +229,11 @@ def deliver(subscription_id: int, article_id: int) -> dict[str, Any]:
         http_status=status,
         error=None if ok else f"receiver answered {status}",
     )
+    if ok and sub.interval == Subscription.Interval.INSTANT:
+        # The digest tracks its own window; instant subscriptions only report the last send.
+        Subscription.objects.filter(pk=sub.id, interval=sub.interval).update(
+            last_notified_at=timezone.now()
+        )
     return {"status": status, "succeeded": ok}
 
 

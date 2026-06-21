@@ -4,12 +4,13 @@ from typing import Any
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.db import transaction
+from django.db import connection, transaction
 from rest_framework import serializers
 
 from apps.feeds.models import Feed
 from apps.feeds.validators import SSRFError, assert_public_url
 from apps.subscriptions.models import Subscription, new_webhook_secret
+from apps.subscriptions.targets import target_key
 from apps.tags.models import Tag
 
 MAX_FILTER_IDS = 100
@@ -110,14 +111,18 @@ class SubscriptionSerializer(serializers.ModelSerializer[Subscription]):
         return attrs
 
     def _check_target(self, owner_id: int, delivery: str, target: str | None) -> None:
-        """Bound how many accounts can point their subscriptions at one address or URL."""
-        if not target:
+        """Bound how many accounts can point their subscriptions at one address or URL.
+
+        Spelling variants of a target share one key, and the key is locked until the end of
+        the transaction, so parallel requests from different accounts cannot all pass.
+        """
+        key = target_key(delivery, target)
+        if not key:
             return
-        others = Subscription.objects.exclude(owner_id=owner_id)
-        if delivery == Subscription.Delivery.EMAIL:
-            others = others.filter(email_to__iexact=target)
-        else:
-            others = others.filter(webhook_url=target)
+        if connection.vendor == "postgresql":
+            with connection.cursor() as cur:
+                cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s));", [key])
+        others = Subscription.objects.exclude(owner_id=owner_id).filter(target_key=key)
         limit = settings.MAX_ACCOUNTS_PER_TARGET
         if others.values("owner_id").distinct().count() >= limit:
             raise serializers.ValidationError(
@@ -150,10 +155,11 @@ class SubscriptionSerializer(serializers.ModelSerializer[Subscription]):
         field = _target_field(delivery)
         target = validated.get(field, getattr(instance, field))
         current = getattr(instance, _target_field(instance.delivery))
-        if (delivery, target) != (instance.delivery, current):
-            self._check_target(instance.owner_id, delivery, target)
-        instance = super().update(instance, validated)
-        self._ensure_secret(instance)
+        with transaction.atomic():
+            if (delivery, target) != (instance.delivery, current):
+                self._check_target(instance.owner_id, delivery, target)
+            instance = super().update(instance, validated)
+            self._ensure_secret(instance)
         return instance
 
     def _ensure_secret(self, instance: Subscription) -> None:
