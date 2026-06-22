@@ -44,7 +44,7 @@ Settings are read from the environment (`django-environ`); compose also loads `.
 | Variable | Default | Notes |
 |---|---|---|
 | `DJANGO_SETTINGS_MODULE` | `newsforge.settings.prod` (image, gunicorn, celery); `newsforge.settings.dev` for `manage.py` and compose | |
-| `SECRET_KEY` | none (a dev-only key in `newsforge.settings.dev`) | **required** in prod: random, at least 50 characters, at least 5 distinct ones, not `django-insecure-…`; prod refuses to start otherwise |
+| `SECRET_KEY` | none (a dev-only key in `newsforge.settings.dev`) | **required** in prod: random, at least 50 characters, at least 5 distinct ones, not `django-insecure-…` or a placeholder from this repository; prod refuses to start otherwise |
 | `ALLOWED_HOSTS` | `localhost,127.0.0.1` (`*` in dev) | **required** in prod; comma-separated. Health probes do not need to be listed |
 | `DEBUG` | `False` (`True` in dev) | |
 | `DATABASE_URL` | `postgres://nf:nf@db:5432/newsforge` | |
@@ -142,6 +142,9 @@ that address to `ALLOWED_HOSTS`.
 7. Scrape `/metrics` with `Authorization: Bearer $METRICS_TOKEN`, probe `/health/ready`.
 8. Put a reverse proxy in front of gunicorn: its sync workers are not meant to face slow
    clients directly.
+9. Rebuild the image regularly with a fresh base
+   (`docker build --pull -f docker/Dockerfile --target runtime .`) so Debian and Python security updates reach it; pinned Python dependencies are updated
+   separately in `pyproject.toml`.
 
 ## Scaling notes
 

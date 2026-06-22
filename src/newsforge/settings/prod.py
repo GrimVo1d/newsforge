@@ -13,6 +13,8 @@ if (
     or len(set(SECRET_KEY)) < 5
     or SECRET_KEY.startswith("django-insecure-")
     or SECRET_KEY == DEV_SECRET_KEY
+    # Placeholders that were committed to this repository at some point.
+    or any(marker in SECRET_KEY.lower() for marker in ("insecure", "test-only"))
 ):
     raise ImproperlyConfigured(
         "SECRET_KEY must be a random string of at least 50 characters "

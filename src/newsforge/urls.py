@@ -17,5 +17,7 @@ urlpatterns = [
 ]
 
 # Errors outside DRF views (unknown paths, crashes) answer in the API's error envelope too.
+handler400 = "apps.core.exceptions.bad_request"
+handler403 = "apps.core.exceptions.permission_denied"
 handler404 = "apps.core.exceptions.not_found"
 handler500 = "apps.core.exceptions.server_error"

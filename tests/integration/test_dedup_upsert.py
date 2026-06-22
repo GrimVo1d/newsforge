@@ -173,6 +173,14 @@ def test_trigger_does_not_depend_on_search_path(feed):
         cur.execute("RESET search_path")
 
 
+def test_trigger_resolves_built_ins_before_public():
+    from django.db import connection
+
+    with connection.cursor() as cur:
+        cur.execute("SELECT proconfig FROM pg_proc WHERE proname = 'articles_tsv_update'")
+        assert cur.fetchone()[0] == ["search_path=pg_catalog, public"]
+
+
 def test_redelivered_task_still_tags_and_fans_out(feed, user):
     from unittest.mock import patch
 

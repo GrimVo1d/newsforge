@@ -51,7 +51,7 @@ SELECT tgname FROM pg_trigger WHERE tgrelid = 'articles_article'::regclass AND N
 ```
 
 **Remediation:** if the trigger is missing, recreate the function with the `TRIGGER_SQL`
-statement from `src/apps/articles/migrations/0006_trigger_search_path_and_full_hash.py` and
+statement from `src/apps/articles/migrations/0007_trigger_search_path_catalog_first.py` and
 the trigger with the `CREATE TRIGGER` part of `TRIGGER_SQL` in
 `src/apps/articles/migrations/0001_initial.py`, in psql. Then
 rebuild the vectors: `make reindex-tsv`, or in batches on a large table:

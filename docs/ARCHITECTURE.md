@@ -149,9 +149,9 @@ See [ADR-0004](ADR/0004-dedup-precedence.md).
 `articles_article.tsv` is maintained by a `BEFORE INSERT OR UPDATE OF title, summary, body,
 language` trigger: title weight A, summary B, body C, each passed through `unaccent` and
 `to_tsvector(language::regconfig, ...)` (at most 1000 / 100 000 / 300 000 characters, as one
-`tsvector` is limited to 1 MB). The function pins its `search_path`, so it works whatever the
-session's setting. A partial GIN index covers non-deleted rows; a
-trigram GIN index on `title` serves the fuzzy fallback. See [ADR-0001](ADR/0001-tsvector-trigger.md),
+`tsvector` is limited to 1 MB). The function pins its `search_path` (`pg_catalog` first, so
+objects in `public` cannot shadow built-ins), so it works whatever the session's setting. A
+partial GIN index covers non-deleted rows; a trigram GIN index on `title` serves the fuzzy fallback. See [ADR-0001](ADR/0001-tsvector-trigger.md),
 [ADR-0002](ADR/0002-per-article-regconfig.md) and [SEARCH.md](SEARCH.md).
 
 ### Tag rules (`apps.tags.engine`)

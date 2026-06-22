@@ -81,6 +81,12 @@ def test_unhandled_errors_are_json(monkeypatch):
     assert "exploded" not in detail
 
 
+def test_disallowed_host_is_json(settings):
+    settings.ALLOWED_HOSTS = ["news.example.internal"]
+    resp = APIClient().get("/api/v1/feeds/", HTTP_HOST="attacker.example.internal")
+    assert _envelope(resp, 400, "bad_request") == "Bad request."
+
+
 def test_list_offset_is_capped(api):
     detail = _envelope(api.get("/api/v1/articles/", {"offset": 10_001}), 400, "validation_error")
     assert "offset" in detail

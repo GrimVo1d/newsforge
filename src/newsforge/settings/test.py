@@ -1,8 +1,11 @@
+import secrets
+
 from .base import *  # noqa: F403
 from .base import REST_FRAMEWORK
 
 DEBUG = False
-SECRET_KEY = "test-only-secret-key-not-used-outside-the-test-suite-0123456789"
+# Random per run: a fixed key here would be public and could end up in a real deployment.
+SECRET_KEY = secrets.token_urlsafe(50)
 CELERY_TASK_ALWAYS_EAGER = True
 CELERY_TASK_EAGER_PROPAGATES = True
 EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"

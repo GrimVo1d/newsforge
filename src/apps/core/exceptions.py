@@ -3,8 +3,9 @@
 ``detail`` is a string, except for ``validation_error``, where it maps field names to lists
 of messages (errors not tied to one field are under ``non_field_errors``).
 
-Wired in settings via REST_FRAMEWORK['EXCEPTION_HANDLER']; ``handler404`` / ``handler500``
-answer in the same shape for requests that never reach a DRF view.
+Wired in settings via REST_FRAMEWORK['EXCEPTION_HANDLER']; ``handler400`` / ``handler403`` /
+``handler404`` / ``handler500`` answer in the same shape for requests that never reach a DRF
+view (e.g. a ``Host`` header outside ``ALLOWED_HOSTS``).
 """
 
 from __future__ import annotations
@@ -60,6 +61,14 @@ def envelope(exc: Exception, context: dict[str, Any]) -> Response | None:
         return response
     response.data = {"code": _code(exc), "detail": _detail(exc, data)}
     return response
+
+
+def bad_request(request: HttpRequest, exception: Exception | None = None) -> JsonResponse:
+    return JsonResponse({"code": "bad_request", "detail": "Bad request."}, status=400)
+
+
+def permission_denied(request: HttpRequest, exception: Exception | None = None) -> JsonResponse:
+    return JsonResponse({"code": "permission_denied", "detail": "Permission denied."}, status=403)
 
 
 def not_found(request: HttpRequest, exception: Exception | None = None) -> JsonResponse:

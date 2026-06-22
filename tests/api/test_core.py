@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 import subprocess
 import sys
 
@@ -32,7 +33,7 @@ def test_list_limit_is_capped(api, feed):
     assert "limit=100" in (resp.json()["next"] or "limit=100")
 
 
-GOOD_KEY = "kq3F8vYp2LmZ7tW1xR9sB4nJ6hD0cA5eU-gT_iO3wE8rQ2yN7uM1"
+GOOD_KEY = secrets.token_urlsafe(50)  # generated, so no usable key lives in the repository
 
 
 def _run_python(code: str, **env: str) -> subprocess.CompletedProcess[str]:
@@ -74,6 +75,7 @@ def test_prod_settings_require_secret_key_and_hosts():
         "dev-only-insecure-secret-key-do-not-use-in-prod",
         "x" * 64,
         "django-insecure-" + GOOD_KEY,
+        "test-only-" + GOOD_KEY,
     ],
 )
 def test_prod_settings_reject_placeholder_secret_keys(key):

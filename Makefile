@@ -55,6 +55,7 @@ reindex-tsv: ## rebuild articles_article.tsv through the trigger
 dump-feeds: ## dump feeds to initial_feeds.json (git-ignored)
 	$(COMPOSE) run --rm -T api python manage.py dumpdata feeds.feed --indent 2 > initial_feeds.json
 
-db-reset: ## drop the dev database volume and recreate it (DESTRUCTIVE)
+db-reset: ## drop the dev database volume, recreate it and migrate (DESTRUCTIVE)
 	$(COMPOSE) down -v
 	$(COMPOSE) up -d db
+	$(COMPOSE) run --rm migrate

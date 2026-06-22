@@ -56,7 +56,8 @@ Access tokens live 15 minutes, refresh tokens 7 days; renew with
 
 In the examples below `$STAFF` and `$TOKEN` hold the access tokens of the staff account and
 of a regular user. Hosts under `example.internal` are placeholders: they do not resolve, so
-feed and webhook URLs built on them are rejected with `400` (`ssrf_blocked`). Put a real
+feed and webhook URLs built on them are rejected with `400 validation_error`
+(`"url": ["host does not resolve to a public address"]`, or the same under `webhook_url`). Put a real
 public feed or receiver in their place.
 
 ## 3. Add a feed (staff)
