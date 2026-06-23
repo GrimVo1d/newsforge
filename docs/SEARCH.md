@@ -8,7 +8,7 @@ default, on top of the anonymous / per-user limits).
 | Parameter | Default | Values |
 |---|---|---|
 | `q` | — | up to 256 characters, web-search syntax (below); empty → empty result |
-| `lang` | `simple` | `russian` / `ru`, `english` / `en`, `simple` — how `q` is parsed |
+| `lang` | every language | `russian` / `ru`, `english` / `en`, `simple` — how `q` is parsed |
 | `sort` | `rank` | `rank` (relevance, then newest) or `date` (newest first, no snippets) |
 | `feed` | all | feed ids: `feed=1&feed=2` or `feed=1,2`, at most 50 |
 | `from`, `to` | — | ISO 8601 datetimes, `from <= published_at < to` |
@@ -26,8 +26,10 @@ never returned.
 Query syntax (`websearch_to_tsquery`): words are AND-ed, `"quoted phrase"`, `or`, and `-word`
 to exclude. `unaccent` is applied to both the query and the index, so `café` matches `cafe`.
 
-Pass `lang` matching the content you are looking for: a Russian query parsed with `simple`
-does not stem, so `обновления` will not match `обновление`.
+Without `lang`, `q` is parsed with every supported config and the results are OR-ed, so each
+article matches in the language it was indexed with (`issue` finds `issues` in English
+articles, `обновление` finds `обновления` in Russian ones). Pass `lang` to restrict parsing to
+one config, e.g. `simple` for exact words without stemming.
 
 
 ## Ranking weights
@@ -53,7 +55,8 @@ because cover density already discounts spread terms.
 |---|---|
 | `russian`, `ru` | `russian` |
 | `english`, `en` | `english` |
-| `simple` / not given | `simple` |
+| `simple` | `simple` |
+| not given | all of the above, OR-ed |
 
 Each article stores the configuration it was indexed with (detected at ingest). Subscriptions
 parse their query in the language of each candidate article.
@@ -70,13 +73,14 @@ MaxFragments=2, MinWords=5, MaxWords=20, StartSel=U+E000, StopSel=U+E001
 
 `MaxFragments=2` keeps the response payload bounded. Highlighting is the most expensive
 operator in the query, so `search_rank.sql` computes it in an outer query over the already
-limited page. Its input is the first 2000 characters of the summary, put through `unaccent`
-(like the index, so `café` is marked for the query `cafe`; the snippet is therefore shown
-without diacritics: `café` → `cafe`, `ё` → `е`) and then stripped of tags. Matches are marked
+limited page, parsed in the article's own language when `lang` is not given. Its input is
+the first 2000 characters of the summary, stripped of tags and put through `unaccent` (like
+the index, so `café` is marked for the query `cafe`; the snippet is therefore shown without
+diacritics: `café` → `cafe`, `ё` → `е`). `unaccent` maps `«`, `‹` and `＜` to `<<` / `<`;
+these are turned back into quotes, so text in angle quotes is kept. Matches are marked
 with two private-use characters, not with `<b>`: `apps.search.queries.render_highlight`
 HTML-escapes the whole snippet (`&amp;`, `&lt;`) and only then turns the marks into `<b>` and
-`</b>`. Nothing in the text can become markup this way, including characters that `unaccent`
-maps to `<` (`‹`, `＜`, `«`), so the snippet is safe to render as HTML.
+`</b>`. Nothing in the text can become markup this way, so the snippet is safe to render as HTML.
 
 ## Fuzzy fallback (`pg_trgm`)
 
@@ -100,7 +104,8 @@ cut-offs are the `pg_trgm.similarity_threshold` (0.3) and
 
 1. `CREATE TEXT SEARCH CONFIGURATION <name> ( COPY = pg_catalog.simple );` then `ALTER` to wire the appropriate dict.
 2. Drop stopword / synonym files into PG `$SHAREDIR/tsearch_data/`.
-3. Add the regconfig name to `apps.search.queries.SUPPORTED_LANGS` (and a short alias to
+3. Add the regconfig name to `apps.search.queries.SUPPORTED_LANGS` and to the no-`lang`
+   branch of `search_rank.sql` / `search_date.sql` (and a short alias to
    `LANG_ALIASES`, if any), to `LANG_CHOICES` in
    `apps.search.serializers`, to `apps.feeds.models.Language`, and map its langdetect code in
    `apps.articles.normalizer._SUPPORTED_LANGS`.

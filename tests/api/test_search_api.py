@@ -164,6 +164,34 @@ def test_highlight_of_a_tag_cut_at_the_prefix_limit(api, make_article):
     assert re.sub(r"</?b>", "", hit["highlight"]).count("<") == 0
 
 
+def test_without_lang_each_article_matches_in_its_own_language(api, make_article):
+    make_article(
+        "Security releases issued",
+        summary="Reporting security issues in Django projects",
+        language="english",
+    )
+    make_article("Обновления безопасности", summary="Вышли обновления", language="russian")
+    (hit,) = api.get(URL, {"q": "issue"}).json()["results"]  # stemmed: issues -> issu
+    assert hit["title"] == "Security releases issued"
+    assert "<b>issues</b>" in hit["highlight"]
+    phrase = api.get(URL, {"q": '"security issues" -celery'}).json()["results"]
+    assert [h["title"] for h in phrase] == ["Security releases issued"]
+    (ru,) = api.get(URL, {"q": "обновление"}).json()["results"]
+    assert ru["title"] == "Обновления безопасности"
+    assert api.get(URL, {"q": "release", "sort": "date"}).json()["count"] == 1
+
+
+def test_highlight_keeps_text_in_angle_quotes(api, make_article):
+    make_article(
+        "Квазар",
+        summary="Компания «Ромашка» выпустила продукт «Квазар» и ‹Пульсар› для разработчиков",
+        language="russian",
+    )
+    (hit,) = api.get(URL, {"q": "квазар", "lang": "ru"}).json()["results"]
+    assert "«<b>Квазар</b>»" in hit["highlight"]
+    assert "«Ромашка»" in hit["highlight"] and "‹Пульсар›" in hit["highlight"]
+
+
 def test_rank_is_normalized(api, articles):
     ranks = [r["rank"] for r in api.get(URL, {"q": "django"}).json()["results"]]
     assert ranks and all(0 < r < 1 for r in ranks)

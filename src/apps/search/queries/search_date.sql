@@ -1,5 +1,14 @@
 WITH q AS (
-  SELECT websearch_to_tsquery(%(cfg)s::regconfig, unaccent(%(query)s)) AS tsq
+  SELECT CASE
+    WHEN %(cfg)s::regconfig IS NOT NULL
+      THEN websearch_to_tsquery(%(cfg)s::regconfig, unaccent(%(query)s))
+    -- No lang given: OR the query as parsed by every supported config (queries.SUPPORTED_LANGS),
+    -- so each article matches the parse that fits how it was indexed. One constant tsquery
+    -- keeps the GIN index usable.
+    ELSE websearch_to_tsquery('english', unaccent(%(query)s))
+      || websearch_to_tsquery('russian', unaccent(%(query)s))
+      || websearch_to_tsquery('simple', unaccent(%(query)s))
+  END AS tsq
 )
 SELECT
   a.id, a.title, a.summary, a.url, a.feed_id, a.published_at, a.language,

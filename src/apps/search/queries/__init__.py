@@ -35,10 +35,13 @@ SEARCH_DATE_SQL = _load("search_date.sql")
 TRGM_FALLBACK_SQL = _load("trgm_fallback.sql")
 
 
-def coerce_lang(lang: str | None) -> str:
-    """Whitelist regconfig names — never interpolate user input into SQL."""
+def coerce_lang(lang: str | None) -> str | None:
+    """Whitelist regconfig names — never interpolate user input into SQL.
+
+    None means no language was given: the query is parsed with every supported config.
+    """
     if not lang:
-        return "simple"
+        return None
     lang = lang.lower()
     if lang in SUPPORTED_LANGS:
         return lang

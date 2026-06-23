@@ -1,9 +1,17 @@
 from apps.search.queries import coerce_lang
 
 
-def test_default_is_simple():
-    assert coerce_lang(None) == "simple"
-    assert coerce_lang("") == "simple"
+def test_default_is_every_language():
+    assert coerce_lang(None) is None
+    assert coerce_lang("") is None
+
+
+def test_every_language_is_tried_without_lang():
+    from apps.search.queries import SEARCH_DATE_SQL, SEARCH_RANK_SQL, SUPPORTED_LANGS
+
+    for sql in (SEARCH_RANK_SQL, SEARCH_DATE_SQL):
+        for lang in SUPPORTED_LANGS:
+            assert f"websearch_to_tsquery('{lang}'" in sql
 
 
 def test_accepts_supported():

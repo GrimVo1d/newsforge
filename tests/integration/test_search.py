@@ -57,3 +57,28 @@ def test_fuzzy_fallback_uses_the_trigram_index(query):
         cur.execute("EXPLAIN " + TRGM_FALLBACK_SQL, {**params, "by_date": False})
         plan = "\n".join(row[0] for row in cur.fetchall())
     assert "articles_title_trgm_idx" in plan, plan
+
+
+@pytest.mark.parametrize("cfg", [None, "english"])
+def test_full_text_uses_the_tsv_index(cfg):
+    from django.db import connection
+
+    from apps.search.queries import HEADLINE_OPTIONS, MARK_START, MARK_STOP, SEARCH_RANK_SQL
+
+    params = {
+        "cfg": cfg,
+        "query": '"security issues" -celery',
+        "from": None,
+        "to": None,
+        "feeds": [],
+        "limit": 20,
+        "offset": 0,
+        "by_date": False,
+        "marks": MARK_START + MARK_STOP,
+        "headline_options": HEADLINE_OPTIONS,
+    }
+    with connection.cursor() as cur:
+        cur.execute("SET LOCAL enable_seqscan = off; SET LOCAL enable_indexscan = off;")
+        cur.execute("EXPLAIN " + SEARCH_RANK_SQL, params)
+        plan = "\n".join(row[0] for row in cur.fetchall())
+    assert "articles_tsv_idx" in plan, plan

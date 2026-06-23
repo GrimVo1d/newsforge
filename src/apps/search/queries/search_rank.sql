@@ -1,5 +1,14 @@
 WITH q AS (
-  SELECT websearch_to_tsquery(%(cfg)s::regconfig, unaccent(%(query)s)) AS tsq
+  SELECT CASE
+    WHEN %(cfg)s::regconfig IS NOT NULL
+      THEN websearch_to_tsquery(%(cfg)s::regconfig, unaccent(%(query)s))
+    -- No lang given: OR the query as parsed by every supported config (queries.SUPPORTED_LANGS),
+    -- so each article matches the parse that fits how it was indexed. One constant tsquery
+    -- keeps the GIN index usable.
+    ELSE websearch_to_tsquery('english', unaccent(%(query)s))
+      || websearch_to_tsquery('russian', unaccent(%(query)s))
+      || websearch_to_tsquery('simple', unaccent(%(query)s))
+  END AS tsq
 ),
 hits AS (
   SELECT
@@ -21,14 +30,17 @@ hits AS (
 SELECT
   h.id, h.title, h.summary, h.url, h.feed_id, h.published_at, h.language, h.rank,
   ts_headline(
-    %(cfg)s::regconfig,
-    -- Unaccented like the index (or "café" would not be marked for "cafe"), then stripped of
-    -- tags and of the mark characters. unaccent can produce "<" (from "‹", "＜", "«"), so it
-    -- runs first; the result is HTML-escaped in Python (queries.render_highlight) anyway.
-    regexp_replace(
-      translate(unaccent(left(coalesce(h.summary, ''), 2000)), %(marks)s, ''),
-      '<[^>]*>', ' ', 'g'
-    ),
+    coalesce(%(cfg)s::regconfig, h.language::regconfig),
+    -- Stripped of tags, then unaccented like the index (or "café" would not be marked for
+    -- "cafe"). unaccent turns "«" into "<<" and "‹", "＜" into "<": those become "‹" / "›"
+    -- again ("«" / "»" when doubled), so no text is mistaken for a tag, and the mark
+    -- characters are dropped. The result is HTML-escaped in Python (render_highlight) anyway.
+    replace(replace(
+      translate(
+        unaccent(regexp_replace(left(coalesce(h.summary, ''), 2000), '<[^>]*>', ' ', 'g')),
+        '<>' || %(marks)s, '‹›'
+      ),
+      '‹‹', '«'), '››', '»'),
     q.tsq,
     %(headline_options)s
   ) AS highlight
