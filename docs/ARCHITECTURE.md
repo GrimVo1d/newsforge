@@ -84,10 +84,11 @@ so a backlog of workers does not pile up duplicates of the same feed.
    (at most 500 KB, truncated beyond that) and evaluates it per RFC 9309: the groups for the
    product token of `USER_AGENT` (`newsforge`), else the `*` groups; the longest matching rule
    wins, `Allow` on a tie; `*` and `$` patterns, matched without regular expressions (the
-   file comes from the feed host) and capped at 2000 rules. A `4xx` means "allowed" and is cached for
-   24 h; a `5xx` or network error means "disallowed" for 30 minutes; a host that is not
-   public is "allowed" here (30 minutes), so the fetch itself reports `ssrf_blocked`. A
-   blocked feed is not paused: it is checked again every interval against the cached copy.
+   file comes from the feed host). Only the rules of those two group sets are kept, each once
+   however many `User-agent` lines name its group, at most 2000. A `4xx` means "allowed" and
+   is cached for 24 h; a `5xx` or network error means "disallowed" for 30 minutes; a host
+   that is not public is "allowed" here (30 minutes), so the fetch itself reports
+   `ssrf_blocked`. A blocked feed is not paused: it is checked again every interval against the cached copy.
 2. **Rate limit** — `ratelimit.try_acquire` sets `rl:fetch:<host>` with `NX` and a TTL of
    `PER_DOMAIN_MIN_INTERVAL`; if the key exists the fetch is skipped and the feed is due again
    after 1–2 × `PER_DOMAIN_MIN_INTERVAL`.

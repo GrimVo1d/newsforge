@@ -387,6 +387,25 @@ def test_robots_rules_are_capped():
     assert robots.can_fetch(body, "https://example.internal/feed.xml", "newsforge")
 
 
+@pytest.mark.parametrize("agent", ["*", "newsforge"])
+def test_robots_rules_are_stored_once_per_group(agent):
+    # Thousands of User-agent lines in front of the rules must not multiply them.
+    body = f"User-agent: {agent}\n" * 30_000 + "Disallow: /private\n" * robots.MAX_RULES
+    robots._rules_for.cache_clear()
+    started = time.monotonic()
+    rules = robots._rules_for(body, "newsforge")
+    assert not robots.can_fetch(body, "https://example.internal/private/x", "newsforge")
+    assert len(rules) == robots.MAX_RULES
+    assert time.monotonic() - started < 2
+    robots._rules_for.cache_clear()
+
+
+def test_robots_rules_of_other_agents_do_not_count():
+    other = "User-agent: otherbot\n" + "Disallow: /x\n" * robots.MAX_RULES
+    body = other + "\nUser-agent: *\nDisallow: /private\n"
+    assert not robots.can_fetch(body, "https://example.internal/private/x", "newsforge")
+
+
 def test_relative_links_and_http_charset(feed, allow_robots):
     title = "Новости дня"
     body = (

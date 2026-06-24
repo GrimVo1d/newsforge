@@ -115,10 +115,15 @@ def _agent_token(value: str) -> str:
 
 @lru_cache(maxsize=32)  # bodies are up to 500 KiB each
 def _rules_for(body: str, token: str) -> tuple[_Rule, ...]:
-    """Rules of all groups that name ``token``, else of the ``*`` groups (RFC 9309 2.2.1)."""
-    groups: dict[str, list[_Rule]] = {}
-    agents: list[str] = []
-    in_rules = False
+    """Rules of all groups that name ``token``, else of the ``*`` groups (RFC 9309 2.2.1).
+
+    Only those two sets are kept, so a rule is stored at most twice however many
+    ``User-agent`` lines its group has.
+    """
+    own: list[_Rule] = []
+    star: list[_Rule] = []
+    named = False  # some group names the token, even if all its rules are empty
+    for_own = for_star = in_rules = False
     count = 0
     for raw in body.splitlines():
         line = raw.split("#", 1)[0].strip()
@@ -128,20 +133,25 @@ def _rules_for(body: str, token: str) -> tuple[_Rule, ...]:
         key, value = key.strip().lower(), value.strip()
         if key == "user-agent":
             if in_rules:
-                agents, in_rules = [], False
-            agents.append(_agent_token(value))
-            groups.setdefault(agents[-1], [])  # a group exists even if all its rules are empty
-        elif key in ("allow", "disallow") and agents:
+                for_own = for_star = in_rules = False
+            agent = _agent_token(value)
+            if token and agent == token:
+                for_own = named = True
+            elif agent == "*":
+                for_star = True
+        elif key in ("allow", "disallow"):
             in_rules = True
+            if not (for_own or for_star):
+                continue
             if not value or len(value) > MAX_PATTERN_CHARS or count >= MAX_RULES:
                 continue  # an empty rule matches nothing
             count += 1
             rule = _rule(key == "allow", value)
-            for agent in agents:
-                groups[agent].append(rule)
-    if token and token in groups:
-        return tuple(groups[token])
-    return tuple(groups.get("*", ()))
+            if for_own:
+                own.append(rule)
+            if for_star:
+                star.append(rule)
+    return tuple(own) if named else tuple(star)
 
 
 def can_fetch(body: str, url: str, token: str) -> bool:
