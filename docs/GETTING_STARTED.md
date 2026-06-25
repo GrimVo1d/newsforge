@@ -195,8 +195,9 @@ Delivery rules:
   up to 5 retries. Other `4xx` answers are final. The answer's body is not read.
 - Every attempt is recorded; see them with `GET $API/subscriptions/{id}/deliveries/`
   (`succeeded`, `attempts`, `http_status`, `error`), newest pair first. `error` is a short
-  category (`receiver answered 503`, `timeout`, `connection failed`, `mail server
-  unavailable`, `blocked: …`); the receiver's or mail server's own text is not stored. For email,
+  category (`receiver answered 503`, `timeout`, `connection failed` — the receiver or mail
+  server could not be reached, `mail server unavailable` — it answered with an SMTP error,
+  `no secret`, `blocked: …`); the receiver's or mail server's own text is not stored. For email,
   `http_status` holds the SMTP reply code: `250` when the server accepted the message, the
   refusal code (e.g. `550`) when it refused the recipient for good.
 - The webhook URL is re-checked on every attempt; a URL that now resolves to a private

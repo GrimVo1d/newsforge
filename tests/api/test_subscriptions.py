@@ -223,6 +223,8 @@ def test_accounts_per_target_are_capped(db, settings):
         ("email", "victim@example.internal", "Victim+news@EXAMPLE.internal"),
         ("email", "first.last@gmail.com", "FirstLast+x@googlemail.com"),
         ("webhook", HOOK, HOOK.replace("hooks.example", "HOOKS.Example") + "/?a=1#x"),
+        ("webhook", HOOK, HOOK.replace("/nf", "/x/../nf")),
+        ("email", "victim@bücher.example.internal", "victim@xn--bcher-kva.example.internal"),
     ],
 )
 def test_target_spelling_variants_count_as_one(db, settings, delivery, first, variant):
@@ -238,6 +240,14 @@ def test_target_spelling_variants_count_as_one(db, settings, delivery, first, va
         client.force_authenticate(get_user_model().objects.create_user(username=f"v{n}"))
         codes.append(client.post(URL, {**body, field: target}, format="json").status_code)
     assert codes == [201, 400]
+
+
+@pytest.mark.parametrize("address", ['"victim"@example.internal', "victim@[93.184.216.34]"])
+def test_quoted_and_literal_addresses_are_refused(user_api, address):
+    body = {"name": "m", "q": "x", "delivery": "email", "email_to": address}
+    resp = user_api.post(URL, body, format="json")
+    assert resp.status_code == 400
+    assert "email_to" in resp.json()["detail"]
 
 
 @pytest.mark.django_db(transaction=True)

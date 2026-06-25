@@ -30,6 +30,7 @@ STRIDE applied to the crawler, the API and subscription delivery.
   validators reject weak passwords.
 - **Forged webhooks** — every delivery is signed with HMAC-SHA256 over timestamp and body
   using a per-subscription secret; receivers verify the signature and the timestamp window.
+  A subscription without a secret (only possible by editing the database) is not sent.
 
 ### Tampering
 
@@ -83,9 +84,11 @@ STRIDE applied to the crawler, the API and subscription delivery.
   checked under a lock on the user, which bounds the matching work per article and the mail /
   webhook volume per account; one email address or webhook URL can be the target of at most
   `MAX_ACCOUNTS_PER_TARGET` (5) accounts, counted on a normalized key (email case, `+tags`,
-  Gmail dots; webhook host case, query, fragment, trailing slash) under a transaction lock on
-  that key, and new accounts per address are capped per day, so many accounts cannot be
-  pointed at one victim.
+  Gmail dots, IDN domains; quoted local parts and address literals are refused; webhook host
+  case, query, fragment, and the path as servers resolve it: dot segments, repeated slashes,
+  percent-encoding, `;params`, case, trailing slash) under a transaction lock on that key,
+  and new accounts per address are capped per day, so many accounts cannot be pointed at one
+  victim.
 - **Delivery log disclosure** — the log a user reads stores a failure category, never the
   text of an SMTP or HTTP error, so it does not reveal mail server internals; details go to
   the worker log.

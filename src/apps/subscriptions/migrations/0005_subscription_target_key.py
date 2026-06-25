@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from django.db import migrations, models
 
+# The live normalization on purpose: a key must always match what the serializer computes,
+# and a later change to it ships with a migration that recomputes the keys (see 0006).
 from apps.subscriptions.targets import target_key
 
 

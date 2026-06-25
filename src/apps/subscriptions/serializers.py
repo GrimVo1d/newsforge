@@ -72,6 +72,17 @@ class SubscriptionSerializer(serializers.ModelSerializer[Subscription]):
             raise serializers.ValidationError(str(exc)) from exc
         return value
 
+    def validate_email_to(self, value: str | None) -> str | None:
+        if not value:
+            return None
+        local, _, domain = value.rpartition("@")
+        # Valid by RFC 5321 but needless here, and each spelling would be another target.
+        if '"' in local or domain.startswith("["):
+            raise serializers.ValidationError(
+                "quoted local parts and address literals are not supported"
+            )
+        return value
+
     def validate_feeds(self, value: list[int]) -> list[int]:
         found = set(
             Feed.objects.filter(pk__in=value, is_deleted=False).values_list("pk", flat=True)

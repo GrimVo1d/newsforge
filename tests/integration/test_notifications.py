@@ -129,6 +129,13 @@ def test_failed_attempts_are_logged_as_a_category(hook, article, receiver, exc, 
     assert DeliveryLog.objects.get(subscription=hook).error == category
 
 
+def test_webhook_without_a_secret_is_not_sent(hook, article, receiver):
+    Subscription.objects.filter(pk=hook.pk).update(webhook_secret="")
+    assert deliver(hook.id, article.id) == {"status": None, "error": "no secret"}
+    assert receiver.calls == []
+    assert DeliveryLog.objects.get(subscription=hook).error == "no secret"
+
+
 def test_instant_delivery_sets_last_notified_at(hook, article, receiver):
     deliver(hook.id, article.id)
     hook.refresh_from_db()

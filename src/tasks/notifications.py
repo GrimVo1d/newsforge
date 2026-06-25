@@ -131,7 +131,7 @@ def _send_webhook(sub: Subscription, body: bytes, idempotency_key: str) -> int:
         "Content-Type": "application/json",
         "User-Agent": settings.USER_AGENT,
         "X-NF-Timestamp": str(timestamp),
-        "X-NF-Signature": sign(sub.webhook_secret or "", timestamp, body),
+        "X-NF-Signature": sign(sub.webhook_secret or "", timestamp, body),  # checked in deliver
         "X-Idempotency-Key": idempotency_key,
     }
     resp = safe_http.request(
@@ -203,6 +203,11 @@ def deliver(subscription_id: int, article_id: int) -> dict[str, Any]:
 
     try:
         if sub.delivery == Subscription.Delivery.WEBHOOK and sub.webhook_url:
+            if not sub.webhook_secret:
+                # Signed with an empty key, the payload could be forged by anyone; the API
+                # always issues a secret, so this is a row made by hand.
+                _record(sub.id, article.id, succeeded=False, http_status=None, error="no secret")
+                return {"status": None, "error": "no secret"}
             body = json.dumps(_payload(article), separators=(",", ":")).encode()
             status = _send_webhook(sub, body, _idempotency_key(subscription_id, article_id))
         elif sub.delivery == Subscription.Delivery.EMAIL and sub.email_to:
