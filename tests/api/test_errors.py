@@ -87,6 +87,13 @@ def test_disallowed_host_is_json(settings):
     assert _envelope(resp, 400, "bad_request") == "Bad request."
 
 
+def test_csrf_failure_is_json():
+    from django.test import Client
+
+    resp = Client(enforce_csrf_checks=True).post("/metrics")
+    assert _envelope(resp, 403, "csrf_failed") == "CSRF verification failed."
+
+
 def test_list_offset_is_capped(api):
     detail = _envelope(api.get("/api/v1/articles/", {"offset": 10_001}), 400, "validation_error")
     assert "offset" in detail

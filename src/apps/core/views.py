@@ -10,9 +10,10 @@ from rest_framework import serializers, status
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.throttling import ScopedRateThrottle, SimpleRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+
+from apps.core.throttling import RegisterThrottle, ScopedRateThrottle
 
 
 class RegisterSerializer(serializers.Serializer[Any]):
@@ -27,15 +28,6 @@ class RegisterSerializer(serializers.Serializer[Any]):
         except DjangoValidationError as exc:
             raise serializers.ValidationError({"password": exc.messages}) from exc
         return attrs
-
-
-class RegisterThrottle(SimpleRateThrottle):
-    """Accounts created per client address, whether or not the request is authenticated."""
-
-    scope = "register"
-
-    def get_cache_key(self, request: Request, view: APIView) -> str:
-        return self.cache_format % {"scope": self.scope, "ident": self.get_ident(request)}
 
 
 class RegisterView(APIView):

@@ -24,10 +24,10 @@ STRIDE applied to the crawler, the API and subscription delivery.
 
 - **Stolen access tokens** — access tokens live 15 minutes, refresh tokens 7 days.
 - **Brute force** — register / token / refresh endpoints share a 10 requests per minute
-  throttle per client address, and registration also has a daily cap (20 accounts per
-  address); `X-Forwarded-For` is ignored unless `NUM_PROXIES` says how many
-  trusted proxies set it, so a client cannot pick a fresh bucket per request. Django password
-  validators reject weak passwords.
+  throttle per client address (an IPv6 client per `/64`), and registration also has a daily
+  cap (20 accounts per address); `X-Forwarded-For` is ignored unless `NUM_PROXIES` says how
+  many trusted proxies set it, so a client cannot pick a fresh bucket per request. Django
+  password validators reject weak passwords.
 - **Forged webhooks** — every delivery is signed with HMAC-SHA256 over timestamp and body
   using a per-subscription secret; receivers verify the signature and the timestamp window.
   A subscription without a secret (only possible by editing the database) is not sent.
@@ -63,9 +63,10 @@ STRIDE applied to the crawler, the API and subscription delivery.
   was broken, which says nothing about the network.
 - Articles of deleted feeds disappear from search, listings and subscription matching.
 - Production settings are the default of the image and of every server entry point (gunicorn,
-  celery); only `manage.py` and compose pick dev. They have no default `SECRET_KEY` or
-  `ALLOWED_HOSTS` (a weak or placeholder key refuses to start), `DEBUG=False`, HTTPS redirect,
-  HSTS, secure cookies; compose binds every port to localhost.
+  celery); only `manage.py` and compose pick dev. They have no default `SECRET_KEY`,
+  `ALLOWED_HOSTS`, database, Redis or broker URL (a weak key, or one ever committed to this
+  repository, refuses to start), `DEBUG=False`, HTTPS redirect, HSTS, secure cookies and a
+  JSON-only API; compose binds every port to localhost.
 
 ### Denial of service
 

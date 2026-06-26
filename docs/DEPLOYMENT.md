@@ -47,10 +47,10 @@ Settings are read from the environment (`django-environ`); compose also loads `.
 | `SECRET_KEY` | none (a dev-only key in `newsforge.settings.dev`) | **required** in prod: random, at least 50 characters, at least 5 distinct ones, not `django-insecure-…` or a placeholder from this repository; prod refuses to start otherwise |
 | `ALLOWED_HOSTS` | `localhost,127.0.0.1` (`*` in dev) | **required** in prod; comma-separated. Health probes do not need to be listed |
 | `DEBUG` | `False` (`True` in dev) | |
-| `DATABASE_URL` | `postgres://nf:nf@db:5432/newsforge` | |
-| `REDIS_URL` | `redis://redis:6379/0` | cache, rate limits, robots.txt cache, readiness |
-| `CELERY_BROKER_URL` | `redis://redis:6379/1` | |
-| `CELERY_RESULT_BACKEND` | `redis://redis:6379/2` | |
+| `DATABASE_URL` | `postgres://nf:nf@db:5432/newsforge` | **required** in prod (no default there) |
+| `REDIS_URL` | `redis://redis:6379/0` | cache, rate limits, robots.txt cache, readiness; **required** in prod |
+| `CELERY_BROKER_URL` | `redis://redis:6379/1` | **required** in prod |
+| `CELERY_RESULT_BACKEND` | `redis://redis:6379/2` | **required** in prod |
 | `LOG_LEVEL` | `INFO` | logs go to stdout |
 | `METRICS_TOKEN` | empty | `/metrics` is disabled (404) while empty |
 
@@ -66,7 +66,8 @@ Settings are read from the environment (`django-environ`); compose also loads `.
 | `NUM_PROXIES` | `0` |
 
 Throttle counters live in the Redis cache, keyed by user for authenticated requests and by
-client address otherwise (registration and token requests are always anonymous). With
+client address otherwise (registration and token requests are always anonymous); an IPv6
+client is keyed by its `/64`, which a single host usually owns whole. With
 `NUM_PROXIES=0` the address is `REMOTE_ADDR` and `X-Forwarded-For` is ignored, since clients
 can set it to anything. Behind reverse proxies set `NUM_PROXIES` to their number: the address
 is then taken from `X-Forwarded-For`, as appended by the outermost trusted proxy. Without it,
@@ -118,8 +119,8 @@ all clients behind the proxy share one bucket.
 | `TRUST_X_FORWARDED_PROTO` | `false` | trust `X-Forwarded-Proto: https`; enable only behind a proxy that always sets it |
 | `SECURE_HSTS_PRELOAD` | `false` | HSTS itself is on (1 year, subdomains) |
 
-Session and CSRF cookies are marked secure. `python manage.py check --deploy` reports no
-security warnings with these settings.
+Session and CSRF cookies are marked secure, and the API renders JSON only (no browsable
+API). `python manage.py check --deploy` reports no security warnings with these settings.
 
 `/health/live` and `/health/ready` are answered before the host check and the HTTPS redirect,
 so a probe can call `http://127.0.0.1:8000/health/live` inside the container without adding

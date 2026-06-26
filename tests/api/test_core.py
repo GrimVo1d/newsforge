@@ -36,8 +36,10 @@ def test_list_limit_is_capped(api, feed):
 GOOD_KEY = secrets.token_urlsafe(50)  # generated, so no usable key lives in the repository
 
 
-def _run_python(code: str, **env: str) -> subprocess.CompletedProcess[str]:
-    unset = {"SECRET_KEY", "ALLOWED_HOSTS", "DJANGO_SETTINGS_MODULE"}
+def _run_python(
+    code: str, unset: tuple[str, ...] = (), **env: str
+) -> subprocess.CompletedProcess[str]:
+    unset = ("SECRET_KEY", "ALLOWED_HOSTS", "DJANGO_SETTINGS_MODULE", *unset)
     clean = {k: v for k, v in os.environ.items() if k not in unset}
     clean.update(env)
     return subprocess.run(
@@ -69,6 +71,43 @@ def test_prod_settings_require_secret_key_and_hosts():
 
 
 @pytest.mark.parametrize(
+    "name", ["DATABASE_URL", "REDIS_URL", "CELERY_BROKER_URL", "CELERY_RESULT_BACKEND"]
+)
+def test_prod_settings_require_service_urls(name):
+    env = {
+        "SECRET_KEY": GOOD_KEY,
+        "ALLOWED_HOSTS": "news.example.internal",
+        "DATABASE_URL": "postgres://u:p@db.example.internal:5432/nf",
+        "REDIS_URL": "redis://cache.example.internal:6379/0",
+        "CELERY_BROKER_URL": "redis://cache.example.internal:6379/1",
+        "CELERY_RESULT_BACKEND": "redis://cache.example.internal:6379/2",
+    }
+    del env[name]
+    missing = _run_python(
+        "import django; django.setup()",
+        unset=(name,),
+        DJANGO_SETTINGS_MODULE="newsforge.settings.prod",
+        **env,
+    )
+    assert missing.returncode != 0
+    assert name in missing.stderr
+
+
+def test_prod_api_answers_json_only():
+    code = (
+        "import django; django.setup(); from django.conf import settings; "
+        "print(settings.REST_FRAMEWORK['DEFAULT_RENDERER_CLASSES'])"
+    )
+    out = _run_python(
+        code,
+        DJANGO_SETTINGS_MODULE="newsforge.settings.prod",
+        SECRET_KEY=GOOD_KEY,
+        ALLOWED_HOSTS="news.example.internal",
+    )
+    assert out.stdout.strip() == "('rest_framework.renderers.JSONRenderer',)", out.stderr
+
+
+@pytest.mark.parametrize(
     "key",
     [
         "change-me",
@@ -76,6 +115,7 @@ def test_prod_settings_require_secret_key_and_hosts():
         "x" * 64,
         "django-insecure-" + GOOD_KEY,
         "test-only-" + GOOD_KEY,
+        "kq3F8vYp2LmZ7tW1xR9sB4nJ6hD0cA5eU-gT_iO3wE8rQ2yN7uM1",  # gitleaks:allow (public, refused)
     ],
 )
 def test_prod_settings_reject_placeholder_secret_keys(key):
@@ -112,7 +152,8 @@ def test_metrics_token_needs_bearer_scheme(api):
 
 def test_throttle_ignores_client_supplied_forwarded_for(rf):
     from rest_framework.request import Request
-    from rest_framework.throttling import AnonRateThrottle
+
+    from apps.core.throttling import AnonRateThrottle
 
     throttle = AnonRateThrottle()
     idents = {
@@ -122,6 +163,26 @@ def test_throttle_ignores_client_supplied_forwarded_for(rf):
         for xff in ("1.1.1.1", "2.2.2.2, 3.3.3.3")
     }
     assert idents == {"203.0.113.9"}
+
+
+@pytest.mark.parametrize(
+    ("remote", "ident"),
+    [
+        ("203.0.113.9", "203.0.113.9"),
+        ("2001:db8:1:2:aaaa::1", "2001:db8:1:2::/64"),
+        ("2001:db8:1:2:ffff:ffff:ffff:ffff", "2001:db8:1:2::/64"),
+        ("::ffff:203.0.113.9", "203.0.113.9"),
+        ("not-an-address", "not-an-address"),
+    ],
+)
+def test_throttles_key_ipv6_clients_by_network(rf, remote, ident):
+    from rest_framework.request import Request
+
+    from apps.core.throttling import AnonRateThrottle, RegisterThrottle, ScopedRateThrottle
+
+    request = Request(rf.get("/", REMOTE_ADDR=remote))
+    for throttle in (AnonRateThrottle(), RegisterThrottle(), ScopedRateThrottle()):
+        assert throttle.get_ident(request) == ident
 
 
 def test_api_root_lists_every_resource(api):

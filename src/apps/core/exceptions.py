@@ -5,7 +5,8 @@ of messages (errors not tied to one field are under ``non_field_errors``).
 
 Wired in settings via REST_FRAMEWORK['EXCEPTION_HANDLER']; ``handler400`` / ``handler403`` /
 ``handler404`` / ``handler500`` answer in the same shape for requests that never reach a DRF
-view (e.g. a ``Host`` header outside ``ALLOWED_HOSTS``).
+view (e.g. a ``Host`` header outside ``ALLOWED_HOSTS``), and ``CSRF_FAILURE_VIEW`` for a
+non-DRF view refused by the CSRF middleware.
 """
 
 from __future__ import annotations
@@ -69,6 +70,10 @@ def bad_request(request: HttpRequest, exception: Exception | None = None) -> Jso
 
 def permission_denied(request: HttpRequest, exception: Exception | None = None) -> JsonResponse:
     return JsonResponse({"code": "permission_denied", "detail": "Permission denied."}, status=403)
+
+
+def csrf_failure(request: HttpRequest, reason: str = "") -> JsonResponse:
+    return JsonResponse({"code": "csrf_failed", "detail": "CSRF verification failed."}, status=403)
 
 
 def not_found(request: HttpRequest, exception: Exception | None = None) -> JsonResponse:

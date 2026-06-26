@@ -6,9 +6,9 @@ from drf_spectacular.utils import extend_schema
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle, UserRateThrottle
 from rest_framework.views import APIView
 
+from apps.core.throttling import AnonRateThrottle, ScopedRateThrottle, UserRateThrottle
 from apps.search.queries import run_search
 from apps.search.serializers import SearchParamsSerializer, SearchResponseSerializer
 

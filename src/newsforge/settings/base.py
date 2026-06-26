@@ -92,6 +92,7 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+CSRF_FAILURE_VIEW = "apps.core.exceptions.csrf_failure"
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
@@ -102,8 +103,8 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "apps.core.pagination.LimitOffsetPagination",
     "PAGE_SIZE": 50,
     "DEFAULT_THROTTLE_CLASSES": (
-        "rest_framework.throttling.AnonRateThrottle",
-        "rest_framework.throttling.UserRateThrottle",
+        "apps.core.throttling.AnonRateThrottle",
+        "apps.core.throttling.UserRateThrottle",
     ),
     "DEFAULT_THROTTLE_RATES": {
         "anon": env("THROTTLE_ANON", default="120/min"),
@@ -114,8 +115,9 @@ REST_FRAMEWORK = {
         "register": env("THROTTLE_REGISTER", default="20/day"),
         "search": env("THROTTLE_SEARCH", default="60/min"),
     },
-    # Throttles key anonymous clients by address. With NUM_PROXIES unset DRF would use the
-    # whole client-supplied X-Forwarded-For header, so every request could pick its own bucket.
+    # Throttles key anonymous clients by address (apps.core.throttling: an IPv6 client by its
+    # /64). With NUM_PROXIES unset DRF would use the whole client-supplied X-Forwarded-For
+    # header, so every request could pick its own bucket.
     # 0 = use REMOTE_ADDR; N = take the address appended by the N-th trusted proxy.
     "NUM_PROXIES": env.int("NUM_PROXIES", default=0),
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
